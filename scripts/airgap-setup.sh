@@ -5,7 +5,7 @@ shopt -s expand_aliases
 source ~/.bashrc 2>/dev/null
 
 clear
-spokit_version="0.4.3"
+spokit_version="0.4.4"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -43,7 +43,7 @@ EOF
 Main(){
     view_title_logo "${spokit_version}" "エアギャップマシンセットアップ"
 
-    if [[ $whoami = "root" ]]; then
+    if [[ $EUID -eq 0 ]]; then
         echo -e "${RED}rootユーザーでは実行できません${NC}"
         echo "一般ユーザーで再度実行してください"
         exit 1
@@ -72,7 +72,7 @@ Main(){
     echo -e "${GREEN}依存関係のインストールが完了しました${NC}"
 
     #cardano-cliインストール
-    source <(curl -fsSL https://raw.githubusercontent.com/btbf/sjg-tools/refs/heads/main/scripts/components/node_install)
+    source <(curl -fsSL https://raw.githubusercontent.com/btbf/spokit/refs/heads/main/scripts/components/node_install)
 
     echo "アーキテクチャ判定中..."
     arch=$(uname -m)
@@ -118,7 +118,6 @@ Main(){
 }
 
 Main
-
 
 
 
