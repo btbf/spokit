@@ -43,7 +43,7 @@ EOF
 Main(){
     view_title_logo "${spokit_version}" "エアギャップマシンセットアップ"
 
-    if [[ $whoami = "root" ]]; then
+    if [[ $EUID -eq 0 ]]; then
         echo -e "${RED}rootユーザーでは実行できません${NC}"
         echo "一般ユーザーで再度実行してください"
         exit 1
@@ -118,7 +118,6 @@ Main(){
 }
 
 Main
-
 
 
 
