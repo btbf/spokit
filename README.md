@@ -11,10 +11,9 @@ Linux初級者から上級者までステークプール運営にかかる工数
 
 
 
-## インストール前の準備物
+## インストール前の準備
 - Ubuntuサーバー(メインネットの場合は最低3台)
 - エアギャップマシン
-- 各マシンはsudo権限を持つ一般ユーザーでログイン
 - ターミナルソフト(R-Login/Termius/etc...)
 - SFTPソフト(FileZilla/etc...)
 
@@ -27,15 +26,52 @@ SSD | 500GB以上 | 100GB以上 |
 
 ## プール用サーバーセットアップ
 
+### 任意ユーザー作成
+```
+adduser cardano
+```
+```
+usermod -G sudo cardano
+```
+
+### SSH鍵作成
+Windowsの場合
+```
+Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Client*'
+```
+```
+mkdir ~/.ssh -Force
+ssh-keygen -t ed25519 -N "" -C "ssh_connect" -f ~/.ssh/ssh_ed25519
+```
+```
+cd ~/.ssh
+mv ssh_ed25519.pub authorized_keys
+```
+
+Macの場合
+```
+mkdir -p ~/.ssh
+ssh-keygen -t ed25519 -N "" -C "ssh_connect" -f ~/.ssh/ssh_ed25519
+```
+```
+cd ~/.ssh
+mv ssh_ed25519.pub authorized_keys
+```
+
+SSH接続する場合に使用します。
+~/.ssh/ssh_ed25519 （秘密鍵）
+~/.ssh/authorized_keys （公開鍵）
+
+
 ### インストール
 安定リリース版
 ```
-wget -qO- https://raw.githubusercontent.com/btbf/sjg-tools/refs/heads/main/scripts/install.sh | bash
+wget -qO- https://spokit.spojapanguild.net/install.sh | bash
 ```
 
 開発版
 ```
-SPOKIT_MODE=develop bash <(wget -qO- https://raw.githubusercontent.com/btbf/sjg-tools/refs/heads/develop/scripts/install.sh)
+SPOKIT_MODE=develop bash <(wget -qO- https://raw.githubusercontent.com/btbf/spokit/refs/heads/develop/scripts/install.sh)
 ```
 
 ### 環境変数再読み込み
