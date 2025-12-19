@@ -8,7 +8,7 @@ clear
 SPOKIT_INST_DIR=/opt/spokit
 SPOKIT_HOME=$HOME/spokit
 gum_version="0.16.2"
-spokit_version="0.4.3"
+spokit_version="0.4.4"
 
 source ${HOME}/.bashrc
 

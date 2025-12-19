@@ -5,7 +5,7 @@ shopt -s expand_aliases
 source ~/.bashrc 2>/dev/null
 
 clear
-spokit_version="0.4.3"
+spokit_version="0.4.4"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
