@@ -18,13 +18,31 @@ Linux初級者から上級者までステークプール運営にかかる工数
 - SFTPソフト(FileZilla/etc...)
 
 ## 推奨サーバースペック
-項目 | BP/リレー | エアギャプ |
+項目 | BP/リレー | エアギャプ(ローカル物理PC) |
 |-----|-----|-----|
-OS | Ubuntu22.04 | Win/Mac/Ubuntu
+OS | Ubuntu22.04 | Ubuntu22.04
 RAM | 24GB以上 | 8GB以上 |
 SSD | 500GB以上 | 100GB以上 |
 
-## プール用サーバーセットアップ
+## 1. エアギャップマシンセットアップ
+
+### エアギャップマシン作成
+
+**以下手順でローカルPCにUbuntuをインストールするする**
+[https://docs.spojapanguild.net/setup/air-gap-guid/](https://docs.spojapanguild.net/setup/air-gap-guid/)
+
+
+### エアギャップ環境設定
+以下のコマンドを実行して、エアギャップ環境設定を実施してください。
+```
+wget -qO- https://raw.githubusercontent.com/btbf/sjg-tools/refs/heads/main/scripts/airgap-setup.sh | bash
+```
+環境変数再読み込み
+```
+source $HOME/.bashrc
+```
+
+## 2. プール用サーバーセットアップ
 
 ### 任意ユーザー作成
 ```
@@ -63,15 +81,10 @@ SSH接続する場合に使用します。
 ~/.ssh/authorized_keys （公開鍵）
 
 
-### インストール
+## 3. SPOKITインストール
 安定リリース版
 ```
 wget -qO- https://spokit.spojapanguild.net/install.sh | bash
-```
-
-開発版
-```
-SPOKIT_MODE=develop bash <(wget -qO- https://raw.githubusercontent.com/btbf/spokit/refs/heads/develop/scripts/install.sh)
 ```
 
 ### 環境変数再読み込み
@@ -95,21 +108,9 @@ spokit pool
 spokit
 ```
 
-## エアギャップセットアップ
+## 開発版
 
-### Win/Macの場合
 ```
-**以下手順でUbuntu仮想環境を作成する**
-仮想環境セットアップ手順
-https://docs.spojapanguild.net/setup/air-gap-guid/
+SPOKIT_MODE=develop bash <(wget -qO- https://raw.githubusercontent.com/btbf/spokit/refs/heads/develop/scripts/install.sh)
 ```
 
-### Ubuntuの場合
-UbuntuネイティブPCの場合は以下のコマンドを実行して、初期設定を実施してください。
-```
-wget -qO- https://raw.githubusercontent.com/btbf/sjg-tools/refs/heads/main/scripts/airgap-setup.sh | bash
-```
-環境変数再読み込み
-```
-source $HOME/.bashrc
-```
