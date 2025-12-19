@@ -1,5 +1,5 @@
 #!/bin/bash
-version="0.4.3"
+version="0.4.4"
 env_path=$HOME/spokit/env
 
 
@@ -84,7 +84,7 @@ UfwCheck(){
 
 SpokitUpdateCheck(){
   #githubapiから最新バージョン取得
-  latest_version=$(curl -s https://api.github.com/repos/btbf/sjg-tools/releases/latest | jq -r '.tag_name')
+  latest_version=$(curl -s https://api.github.com/repos/btbf/spokit/releases/latest | jq -r '.tag_name')
 
   if [ "$(printf '%s\n' "$latest_version" "$version" | sort -V | head -n1)" != "$version" ]; then
     echo
@@ -95,7 +95,7 @@ SpokitUpdateCheck(){
     if [[ ${iniSettings} == "Yes" ]]; then
       clear
       echo -e "${YELLOW}spokitをアップデートしています...${NC}"
-      base_url="https://github.com/btbf/sjg-tools/archive/refs/tags/${spokit_version}.tar.gz"
+      base_url="https://github.com/btbf/spokit/archive/refs/tags/${spokit_version}.tar.gz"
       wget -q ${base_url} -O $HOME/spokit.tar.gz
       if [ $? -ne 0 ]; then
         echo -e "${RED}SPOKITのダウンロードに失敗しました。インターネット接続を確認してください。${NC}"
@@ -108,13 +108,13 @@ SpokitUpdateCheck(){
           exit 1
       fi
       rm spokit.tar.gz
-      cd sjg-tools-${spokit_version}/scripts
+      cd spokit-${spokit_version}/scripts
       sudo cp -pR ./* ${SPOKIT_INST_DIR}
       chmod 755 ${SPOKIT_INST_DIR}/spokit_run.sh
       chmod 755 ${SPOKIT_INST_DIR}/spokit.sh
 
       printf "${YELLOW}SPOKITをインストールしました${NC}\n"
-      rm -rf $HOME/git/sjg-tools-${spokit_version}
+      rm -rf $HOME/git/spokit-${spokit_version}
     fi
   fi
 }
