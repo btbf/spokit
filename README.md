@@ -28,7 +28,7 @@ SSD | 500GB以上 | 100GB以上 |
 
 ### エアギャップマシン作成
 
-**以下手順でローカルPCにUbuntuをインストールするする**
+以下手順でローカルPCにUbuntuをインストールする  
 [https://docs.spojapanguild.net/setup/air-gap-guid/](https://docs.spojapanguild.net/setup/air-gap-guid/)
 
 
