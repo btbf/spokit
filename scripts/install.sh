@@ -157,10 +157,10 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
 
     if [[ "$SPOKIT_MODE" == "develop" ]]; then
         echo "🧪 SPOKIT Develop Mode"
-        base_url="https://github.com/btbf/sjg-tools/raw/refs/heads/develop/dist/spokit-develop.tar.gz"
+        base_url="https://github.com/btbf/spokit/raw/refs/heads/develop/dist/spokit-develop.tar.gz"
     else
         echo "🚀 SPOKIT Release Mode"
-        base_url="https://github.com/btbf/sjg-tools/archive/refs/tags/${spokit_version}.tar.gz"
+        base_url="https://github.com/btbf/spokit/archive/refs/tags/${spokit_version}.tar.gz"
     fi
 
     wget -q ${base_url} -O spokit.tar.gz
@@ -176,14 +176,14 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
     fi
     rm spokit.tar.gz
     sudo mkdir -p ${SPOKIT_INST_DIR}
-    cd sjg-tools-${spokit_version}/scripts
+    cd spokit-${spokit_version}/scripts
     sudo cp -pR ./* ${SPOKIT_INST_DIR}
 
     chmod 755 ${SPOKIT_INST_DIR}/spokit_run.sh
     chmod 755 ${SPOKIT_INST_DIR}/spokit.sh
 
     printf "${YELLOW}SPOKITをインストールしました${NC}\n"
-    rm -rf $HOME/git/sjg-tools-${spokit_version}
+    rm -rf $HOME/git/spokit-${spokit_version}
 
     echo
     case "${sync_network}" in

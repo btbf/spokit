@@ -72,7 +72,7 @@ Main(){
     echo -e "${GREEN}依存関係のインストールが完了しました${NC}"
 
     #cardano-cliインストール
-    source <(curl -fsSL https://raw.githubusercontent.com/btbf/sjg-tools/refs/heads/main/scripts/components/node_install)
+    source <(curl -fsSL https://raw.githubusercontent.com/btbf/spokit/refs/heads/main/scripts/components/node_install)
 
     echo "アーキテクチャ判定中..."
     arch=$(uname -m)
