@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spokit</title>
+  <link rel="icon" href="https://spokit.spojapanguild.net/images/spokit.ico" type="image/x-icon">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans JP', sans-serif;
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(40px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeInUp 0.8s ease-out both; }
+    .fade-in { animation: fadeIn 0.5s ease-out forwards; }
+    .fade-out { animation: fadeOut 0.5s ease-in forwards; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(10px); }
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-b from-[#f5f9fc] via-[#c9dce6] to-[#6089a1] dark:from-[#0b1117] dark:via-[#1d2733] dark:to-[#243b4d] text-[#1a202c] dark:text-[#f1f5f9] min-h-screen flex flex-col">
+  <header class="sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-end">
+      <button id="darkModeToggle" class="text-lg text-gray-600 dark:text-gray-300"><i class="fas fa-moon"></i></button>
+      <div class="relative ml-4">
+        <button id="langDropdownToggle" class="text-sm border px-2 py-1 rounded text-gray-600 dark:text-gray-300">Language ▼</button>
+        <div id="langDropdownMenu" class="absolute right-0 mt-2 w-32 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded shadow-lg hidden z-10">
+          <button class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700" data-lang="jp">日本語</button>
+          <button class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700" data-lang="en">English</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="relative flex-1 px-4 sm:px-6 pt-8 lg:pt-16 pb-16 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-start">
+    <!-- Hero Section -->
+    <section class="text-center fade-up px-4 sm:px-6 lg:px-8 flex flex-col justify-center">
+      <img src="https://spokit.spojapanguild.net/images/spokit-logo-big.png" alt="Spokit Logo" class="mx-auto h-32 md:h-40 animate-fade-up">
+      <p class="text-[#415564] dark:text-[#c0d3dd] text-base text-center max-w-4xl mx-auto">
+        <span class="lang-jp">ノーコマンドでカルダノステークプールをセットアップして<br>カルダノネットワークに参加しよう！</span>
+        <span class="lang-en hidden">Set up a no-command Cardano stake pool and join the<br>Cardano network!</span>
+      </p>
+      <div class="flex flex-wrap justify-center mt-6 gap-4 animate-fade-up">
+        <a href="https://github.com/btbf/sjg-tools" target="_blank" class="bg-[#6089a1] hover:bg-[#4a6d83] text-white px-6 py-3 rounded-lg text-sm font-medium shadow flex items-center gap-2">
+          <i class="fas fa-book"></i>
+          <span class="lang-jp">ドキュメントを読む</span>
+          <span class="lang-en hidden">Read Docs</span>
+        </a>
+        <a href="https://discord.gg/U3gU54c" target="_blank" class="border border-[#6089a1] text-[#6089a1] dark:border-[#8fb4c9] dark:text-[#8fb4c9] px-6 py-3 rounded-lg text-sm font-medium shadow hover:bg-[#e3f1f6] dark:hover:bg-[#1e2a35] flex items-center gap-2">
+          <i class="fab fa-discord"></i>
+          <span class="lang-jp">Discordに参加</span>
+          <span class="lang-en hidden">Join Discord</span>
+        </a>
+      </div>
+      <div class="mt-6 flex flex-wrap justify-center items-center gap-6 opacity-80 px-4 sm:px-6 lg:px-8">
+        <img src="https://spokit.spojapanguild.net/images/sjg-logo-light.png" alt="SPO JAPAN GUILD" class="h-6 block dark:hidden">
+        <img src="https://spokit.spojapanguild.net/images/sjg-logo-dark.png" alt="SPO JAPAN GUILD" class="h-6 hidden dark:block">
+        <img src="https://spokit.spojapanguild.net/images/cardano-logo-light.png" alt="Cardano" class="h-6 block dark:hidden">
+        <img src="https://spokit.spojapanguild.net/images/cardano-logo-dark.png" alt="Cardano" class="h-6 hidden dark:block">
+      </div>
+    </section>
+
+    <!-- Code Section -->
+    <section class="w-full space-y-6 fade-up px-4 sm:px-6">
+      <div>
+        <h3 class="text-xl font-semibold mb-1">
+          <span class="lang-jp">1. インストール</span>
+          <span class="lang-en hidden">1. Install</span>
+        </h3>
+        <div class="bg-[#dae6ef] dark:bg-[#1e2a35] px-3 py-1.5 rounded-lg shadow relative w-full">
+          <code id="code1" class="text-sm font-mono break-all whitespace-pre-wrap block">wget -qO- https://spokit.spojapanguild.net/install.sh | bash</code>
+          <button onclick="copyCode('code1')" class="absolute top-1 right-2 text-[#6089a1] hover:text-[#4a6d83]">
+            <i class="fas fa-copy"></i>
+          </button>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-xl font-semibold mb-2">
+          <span class="lang-jp">2. 設定を反映</span>
+          <span class="lang-en hidden">2. Apply Settings</span>
+        </h3>
+        <div class="bg-[#dae6ef] dark:bg-[#1e2a35] px-3 py-1.5 rounded-lg shadow flex items-center justify-between min-h-[2rem]">
+          <code id="code2" class="text-sm font-mono truncate w-full">source $HOME/.bashrc</code>
+          <button onclick="copyCode('code2')" class="ml-4 text-[#6089a1] hover:text-[#4a6d83]">
+            <i class="fas fa-copy"></i>
+          </button>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-xl font-semibold mb-2">
+          <span class="lang-jp">3. プール構築</span>
+          <span class="lang-en hidden">3. Setup</span>
+        </h3>
+        <div class="bg-[#dae6ef] dark:bg-[#2a3b4f] px-3 py-1.5 rounded-lg shadow flex items-center justify-between min-h-[2rem]">
+          <code id="code3" class="text-sm font-mono truncate">spokit pool</code>
+          <button onclick="copyCode('code3')" class="ml-4 text-[#6089a1] hover:text-[#4a6d83]">
+            <i class="fas fa-copy"></i>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="alertMessage" class="fixed bottom-4 right-4 z-50 hidden px-5 py-3 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-xl shadow-lg">
+    コピーしました！
+  </div>
+
+  <video controls width="100%">
+  <source src="./videos/spokit0.3.9.mp4" type="video/mp4">
+  お使いのブラウザは video タグをサポートしていません。
+</video>
+
+  <footer class="py-6 text-center text-white text-sm px-4 sm:px-6 lg:px-8 mt-auto">
+    &copy; 2025 Spokit. All rights reserved.
+    <div class="mt-4 flex justify-center gap-6">
+      <a href="https://github.com/btbf/sjg-tools" target="_blank" class="text-white hover:text-gray-300">
+        <i class="fab fa-github text-2xl"></i>
+      </a>
+      <a href="https://x.com/spojapanguild" target="_blank" class="text-white hover:text-gray-300">
+        <i class="fab fa-x-twitter text-2xl"></i>
+      </a>
+    </div>
+  </footer>
+
+  <script>
+    function copyCode(id) {
+      const el = document.getElementById(id);
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      try {
+        document.execCommand('copy');
+        sel.removeAllRanges();
+        const alert = document.getElementById("alertMessage");
+        alert.classList.remove("hidden", "fade-out");
+        alert.classList.add("fade-in");
+        setTimeout(() => {
+          alert.classList.remove("fade-in");
+          alert.classList.add("fade-out");
+          setTimeout(() => alert.classList.add("hidden"), 500);
+        }, 1500);
+      } catch (err) {
+        console.error('コピーに失敗しました:', err);
+      }
+    }
+
+    document.getElementById('darkModeToggle').addEventListener('click', () => {
+      const html = document.documentElement;
+      const icon = document.querySelector('#darkModeToggle i');
+      const isDark = html.classList.contains('dark');
+      if (isDark) {
+        html.classList.remove('dark');
+        icon.classList.remove('fa-sun');
+        icon.classList.add('fa-moon');
+      } else {
+        html.classList.add('dark');
+        icon.classList.remove('fa-moon');
+        icon.classList.add('fa-sun');
+      }
+    });
+
+    document.getElementById('langDropdownToggle').addEventListener('click', () => {
+      const menu = document.getElementById('langDropdownMenu');
+      menu.classList.toggle('hidden');
+    });
+
+    document.querySelectorAll('#langDropdownMenu button').forEach(button => {
+      button.addEventListener('click', () => {
+        const selected = button.getAttribute('data-lang');
+        const isJP = selected === 'jp';
+        document.querySelectorAll('.lang-jp').forEach(el => el.classList.toggle('hidden', !isJP));
+        document.querySelectorAll('.lang-en').forEach(el => el.classList.toggle('hidden', isJP));
+        document.getElementById('langDropdownMenu').classList.add('hidden');
+
+        const dropdownToggle = document.getElementById('langDropdownToggle');
+        dropdownToggle.innerText = selected === 'jp' ? '日本語 ▼' : 'English ▼';
+      });
+    });
+  </script>
+</body>
+</html>
+
+
