@@ -165,6 +165,7 @@ case $1 in
   "ubuntu" )
     source ${SPOKIT_INST_DIR}/components/ubuntu_setup
     UbuntuSetup
+    tmux kill-session -t spokit
   ;;
 
   "pool" )

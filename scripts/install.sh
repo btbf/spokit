@@ -111,7 +111,7 @@ EOF
         sudo mkdir -p /etc/apt/keyrings
         curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
         echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-        sudo apt update && sudo apt install gum=${gum_version}
+        sudo apt update && sudo apt install gum=${gum_version} -y
     fi
     sudo apt-mark hold gum
     echo -e "${GREEN}関連ライブラリをインストールしました${NC}"
@@ -276,5 +276,11 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
         echo "最初からやり直す場合はツールを再実行してください"
         exit
     fi
+
+else
+    echo -e ${YELLOW}"Spokitはすでにインストールされています${NC}"
+    echo -e "${GREEN}spokit${NC} または ${GREEN}spokit pool${NC} で起動するかご確認ください"
+    echo
+    read -p "インストールを終了するにはEnterキーを押してください..."
 
 fi
