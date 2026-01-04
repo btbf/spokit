@@ -277,4 +277,10 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
         exit
     fi
 
+else
+    echo -e ${YELLOW}"Spokitはすでにインストールされています${NC}"
+    echo -e "${GREEN}spokit${NC} または ${GREEN}spokit pool${NC} で起動するかご確認ください"
+    echo
+    read -p "インストールを終了するにはEnterキーを押してください..."
+
 fi
