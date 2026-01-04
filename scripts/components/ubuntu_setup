@@ -3,10 +3,10 @@
 # shellcheck source="$HOME/.bashrc"
 UbuntuSetup(){
 
-    Header "Ubuntu初期設定"
+    Header "Ubuntuセキュリティ設定"
 
     sudopass=$(InputSudoPass)
-    echo $sudopass | sudo -S -v
+    printf '%s\n' "$sudopass" | sudo -S -v
     # パッケージ自動更新ツールインストール
     if ! command -v unattended-upgrades &> /dev/null; then
         echo
@@ -64,9 +64,10 @@ UbuntuSetup(){
     echo -e "${YELLOW}デーモン自動再起動回避設定を確認します${NC}\n"
     sleep 2
     if [[ -e /etc/needrestart/ ]]; then
-        echo "\$nrconf{restart} = 'a';" | sudo tee /etc/needrestart/conf.d/50local.conf > /dev/null 2>&1
-        echo "\$nrconf{blacklist_rc} = [qr(^cardano-node\\.service$) => 0,];" | sudo tee -a /etc/needrestart/conf.d/50local.conf
-        echo "\$nrconf{blacklist_rc} = [qr(^cnode-blocknotify.service$) => 0,];" | sudo tee -a /etc/needrestart/conf.d/50local.conf
+        sudo tee /etc/needrestart/conf.d/50local.conf > /dev/null <<'EOF'
+$nrconf{restart} = 'a';
+$nrconf{blacklist_rc} = [qr(^cardano-node\.service$) => 0, qr(^cnode-blocknotify\.service$) => 0,];
+EOF
         echo -e "${YELLOW}デーモン再起動回避設定を適用しました${NC}\n"
         sleep 1
     else
@@ -112,7 +113,7 @@ UbuntuSetup(){
     if [ $? -ne 0 ]; then
         echo -e "${YELLOW}標準のchrony設定が適用されています${NC}"
         Gum_Confirm_YesNo "SPOKIT推奨設定を適用しますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
+        if [ "$iniSettings" = "Yes" ]; then
             cat > $HOME/chrony.conf << EOF
 pool time.google.com       iburst minpoll 2 maxpoll 2 maxsources 3 maxdelay 0.3
 pool time.facebook.com     iburst minpoll 2 maxpoll 2 maxsources 3 maxdelay 0.3
@@ -156,7 +157,7 @@ EOF
             echo -e "${YELLOW}chronyを再起動しました${NC}\n"
             sleep 1
         else
-            echo -e "${YELLOW}chromeを標準設定で運用します${NC}\n"
+            echo -e "${YELLOW}chronyを標準設定で運用します${NC}\n"
             sleep 1
         fi
     else
@@ -173,22 +174,53 @@ EOF
     sleep 2
 
     mkdir -p $HOME/.ssh
+    sudopass=$(InputSudoPass)
+    printf '%s\n' "$sudopass" | sudo -S cp /etc/ssh/sshd_config /etc/ssh/sshd_config.org
 
-    KbdInteractiveAuthentication=$(echo "$sudopass" | sudo -S /usr/sbin/sshd -T | grep -i kbdinteractiveauthentication | awk '{print $2}')
-    PasswordAuthentication=$(echo "$sudopass" | sudo -S /usr/sbin/sshd -T | grep -i passwordauthentication | awk '{print $2}')
-    PermitRootLogin=$(echo "$sudopass" | sudo -S /usr/sbin/sshd -T | grep -i permitrootlogin | awk '{print $2}')
-    PermitEmptyPasswords=$(echo "$sudopass" | sudo -S /usr/sbin/sshd -T | grep -i permitemptypasswords| awk '{print $2}')
+    sshd_config_dump=$(printf '%s\n' "$sudopass" | sudo -S /usr/sbin/sshd -T)
+    KbdInteractiveAuthentication=$(echo "$sshd_config_dump" | grep -i kbdinteractiveauthentication | awk '{print $2}')
+    PasswordAuthentication=$(echo "$sshd_config_dump" | grep -i passwordauthentication | awk '{print $2}')
+    PermitRootLogin=$(echo "$sshd_config_dump" | grep -i permitrootlogin | awk '{print $2}')
+    PermitEmptyPasswords=$(echo "$sshd_config_dump" | grep -i permitemptypasswords | awk '{print $2}')
+    #SSH鍵確認
+    authorized_keys_file="$HOME/.ssh/authorized_keys"
+
+
+    if [ ! -f "$authorized_keys_file" ]; then
+        echo -e "${RED}SSH鍵認証用のauthorized_keysファイルが存在しません${NC}"
+        echo -e "${YELLOW}SSH鍵認証を使用する場合は事前にauthorized_keysファイルを作成し、~/.ssh/ にアップロードしてください${NC}\n"
+        echo -e "authorized_keysファイルが存在しない場合サーバーに再接続できなくなる可能性があります\n"
+
+        echo "authorized_keysファイルをアップロードしたらEnterを押してください"
+        read -p "Enter..."
+            sleep 2
+    fi
+    
 
     if [[ $KbdInteractiveAuthentication != "no" ]]; then
         echo -e "対話式認証（ワンタイムパスワード・PAMなど）設定"
         echo -e "現在値 ${YELLOW}KbdInteractiveAuthentication: ${RED}$KbdInteractiveAuthentication${NC}\n"
         echo -e "推奨値 ${YELLOW}KbdInteractiveAuthentication:${NC} ${GREEN}no${NC}\n"
 
-        Gum_Confirm_YesNo "KbdInteractiveAuthenticationをNoに変更しますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
-            echo -e "${YELLOW}KbdInteractiveAuthenticationをNoに変更します${NC}\n"
-            sudo sed -i '/^#Port 22/i KbdInteractiveAuthentication no' /etc/ssh/sshd_config
-        fi
+        while true; do
+            Gum_Confirm_YesNo "KbdInteractiveAuthenticationをNoに変更しますか?" "Yes" "No"
+            if [ "$iniSettings" = "Yes" ] && [ -f "$authorized_keys_file" ]; then
+                echo -e "${YELLOW}KbdInteractiveAuthenticationをNoに変更します${NC}\n"
+                # 安全に既存設定を置換、なければ追記する
+                if sudo grep -qi '^[[:space:]]*KbdInteractiveAuthentication' /etc/ssh/sshd_config; then
+                    sudo sed -i -E 's/^[#[:space:]]*KbdInteractiveAuthentication[[:space:]].*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config
+                else
+                    sudo bash -c 'echo "KbdInteractiveAuthentication no" >> /etc/ssh/sshd_config'
+                fi
+                break
+            elif [ "$iniSettings" = "Yes" ] && [ ! -f "$authorized_keys_file" ]; then
+                echo -e "${RED}authorized_keysファイルが存在しないため、KbdInteractiveAuthenticationをNoに変更できません${NC}"
+                echo -e "${RED}先にauthorized_keysファイルを作成し、~/.ssh/ にアップロードしてください${NC}\n"
+                echo -e "鍵認証方式を使用しない場合は、KbdInteractiveAuthenticationをNoに変更しないでください\n"
+            else
+                break
+            fi
+        done
     fi
 
     if [[ $PasswordAuthentication != "no" ]]; then
@@ -196,11 +228,25 @@ EOF
         echo -e "現在値 ${YELLOW}PasswordAuthentication: ${RED}$PasswordAuthentication${NC}"
         echo -e "推奨値 ${YELLOW}PasswordAuthentication:${NC} ${GREEN}no${NC}\n"
 
-        Gum_Confirm_YesNo "PasswordAuthenticationをNoに変更しますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
-            echo -e "${YELLOW}PasswordAuthenticationをNoに変更します${NC}\n"
-            sudo sed -i '/^#Port 22/i PasswordAuthentication no' /etc/ssh/sshd_config
-        fi
+        while true; do
+            Gum_Confirm_YesNo "PasswordAuthenticationをNoに変更しますか?" "Yes" "No"
+            if [ "$iniSettings" = "Yes" ] && [ -f "$authorized_keys_file" ]; then
+                echo -e "${YELLOW}PasswordAuthenticationをNoに変更します${NC}\n"
+                # 安全に既存設定を置換、なければ追記する
+                if sudo grep -qi '^[[:space:]]*PasswordAuthentication' /etc/ssh/sshd_config; then
+                    sudo sed -i -E 's/^[#[:space:]]*PasswordAuthentication[[:space:]].*/PasswordAuthentication no/' /etc/ssh/sshd_config
+                else
+                    sudo bash -c 'echo "PasswordAuthentication no" >> /etc/ssh/sshd_config'
+                fi
+                break
+            elif [ "$iniSettings" = "Yes" ] && [ ! -f "$authorized_keys_file" ]; then
+                echo -e "${RED}authorized_keysファイルが存在しないため、PasswordAuthenticationをNoに変更できません${NC}"
+                echo -e "${RED}先にauthorized_keysファイルを作成し、~/.ssh/ にアップロードしてください${NC}\n"
+                echo -e "鍵認証方式を使用しない場合は、PasswordAuthenticationをNoに変更しないでください\n"
+            else
+                break
+            fi
+        done
     fi
 
     if [[ $PermitRootLogin != "no" ]]; then
@@ -209,9 +255,14 @@ EOF
         echo -e "推奨値 ${YELLOW}PermitRootLogin:${NC} ${GREEN}no${NC}\n"
 
         Gum_Confirm_YesNo "PermitRootLoginをNoに変更しますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
+        if [ "$iniSettings" = "Yes" ]; then
             echo -e "${YELLOW}PermitRootLoginをNoに変更します${NC}\n"
-            sudo sed -i '/^#Port 22/i PermitRootLogin no' /etc/ssh/sshd_config
+            # 安全に既存設定を置換、なければ追記する
+            if sudo grep -qi '^[[:space:]]*PermitRootLogin' /etc/ssh/sshd_config; then
+                sudo sed -i -E 's/^[#[:space:]]*PermitRootLogin[[:space:]].*/PermitRootLogin no/' /etc/ssh/sshd_config
+            else
+                sudo bash -c 'echo "PermitRootLogin no" >> /etc/ssh/sshd_config'
+            fi
         fi
     fi
 
@@ -221,19 +272,24 @@ EOF
         echo -e "推奨値 ${YELLOW}PermitEmptyPasswords:${NC} ${GREEN}no${NC}\n"
 
         Gum_Confirm_YesNo "PermitEmptyPasswordsをNoに変更しますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
+        if [ "$iniSettings" = "Yes" ]; then
             echo -e "${YELLOW}PermitEmptyPasswordsをNoに変更します${NC}\n"
-            sudo sed -i '/^#Port 22/i PermitEmptyPasswords no' /etc/ssh/sshd_config
+            # 安全に既存設定を置換、なければ追記する
+            if sudo grep -qi '^[[:space:]]*PermitEmptyPasswords' /etc/ssh/sshd_config; then
+                sudo sed -i -E 's/^[#[:space:]]*PermitEmptyPasswords[[:space:]].*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+            else
+                sudo bash -c 'echo "PermitEmptyPasswords no" >> /etc/ssh/sshd_config'
+            fi
         fi
     fi
 
-    port_number=$(echo "$sudopass" | sudo -S /usr/sbin/sshd -T | grep -i ^port | awk '{print $2}')
+    port_number=$(echo "$sshd_config_dump" | grep -i ^port | awk '{print $2}')
     if [[ $port_number = "22" ]]; then
         echo -e "${GREEN}sshのPort番号は22に設定されています${NC}\n"
         echo -e "${YELLOW}セキュリティの観点からPort番号を変更することを強く推奨します${NC}\n"
 
         Gum_Confirm_YesNo "Portを変更しますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
+        if [ "$iniSettings" = "Yes" ]; then
             select_port "ssh"
             echo -e "${YELLOW}sshのPort番号を22から$port_numberに変更します${NC}\n"
             sudo sed -i "s/^#\?Port.*/Port ${port_number}/" /etc/ssh/sshd_config
@@ -257,7 +313,7 @@ EOF
         echo "不正アクセス対策ツール"
         echo "❌ fail2ban はインストールされていません。"
         Gum_Confirm_YesNo "fail2banをインストールしますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
+        if [ "$iniSettings" = "Yes" ]; then
             echo -e "${YELLOW}fail2banをインストールします${NC}\n"
             sudo apt install fail2ban -y > /dev/null 2>&1
         fi
@@ -275,7 +331,7 @@ logpath = /var/log/auth.log
 maxretry = 3
 EOF
         echo -e "${YELLOW}fail2banを設定しました${NC}\n"
-        echo -e "ポート番号: ${GRREN}$port_number${NC} をfail2banに設定しました\n"
+        echo -e "ポート番号: ${GREEN}$port_number${NC} をfail2banに設定しました\n"
         sudo systemctl restart fail2ban
         echo -e "${YELLOW}fail2banを再起動しました${NC}\n"
         sleep 1
@@ -288,29 +344,29 @@ EOF
     #ufw有効化
     echo -e "${YELLOW}ufwの設定を確認します${NC}\n"
     sleep 1
-    echo $sudopass | sudo -S -v
+    printf '%s\n' "$sudopass" | sudo -S -v
     if [[ $(sudo ufw status | grep -i Status) = "Status: inactive" ]]; then
         echo -e "${YELLOW}ufwが無効になっています${NC}\n"
         echo -e "${YELLOW}セキュリティの観点からufwを有効にすることを強く推奨します${NC}\n"
         echo -e "ただしご利用のVPS側でハードウェアファイアウォールが有効になっている場合は、二重に有効化しないでください\n"
         Gum_Confirm_YesNo "ufwを有効にしますか?" "Yes" "No"
-        if [ $iniSettings = "Yes" ]; then
+        if [ "$iniSettings" = "Yes" ]; then
             echo -e "${YELLOW}ufwを有効にします${NC}\n"
             sudo ufw allow ${port_number}/tcp > /dev/null 2>&1
             sudo ufw --force enable > /dev/null 2>&1
-            echo -e "sshポート番号: ${GRREN}$port_number${NC} をufwに設定しました\n"
+            echo -e "sshポート番号: ${GREEN}$port_number${NC} をufwに設定しました\n"
             echo -e "${YELLOW}ufwを有効にしました${NC}\n"
             sleep 1
         else
             echo -e "${YELLOW}ufwの有効化をスキップしました${NC}\n"
-            echo -e "${YELLOW}ufwを有効にしていない場合は、VPS側のハードウェアファイアウォールにSSHポート(${GRREN}$port_number${NC})を追加してください${NC}\n"
-            echo -e 
+            echo -e "${YELLOW}ufwを有効にしていない場合は、VPS側のハードウェアファイアウォールにSSHポート(${GREEN}$port_number${NC})を追加してください${NC}\n"
+            echo -e
             sleep 1
         fi
     else
         sudo ufw allow ${port_number}/tcp > /dev/null 2>&1
         sudo ufw reload > /dev/null 2>&1
-        echo -e "sshポート番号: ${GRREN}$port_number${NC} をufwに設定しました\n"
+        echo -e "sshポート番号: ${GREEN}$port_number${NC} をufwに設定しました\n"
         sleep 1
     fi
 
@@ -324,9 +380,8 @@ EOF
     echo -e "1.現在の接続を維持しながら新しいウィンドウで再接続してください${NC}\n"
     echo -e "2.再接続する際には新しいポート番号${YELLOW}$port_number${NC}に変更してください\n"
     echo -e "ssh鍵認証を使用する場合"
-    echo -e "1.${GREEN}$HOME/.ssh${NC}に事前に作成した${YELLOW}authorized_keys${NC}をアップロードしてください\n"
-    echo -e "2.接続プロファイルに${YELLOW}ssh_ed25519${NC}を設定して接続してください\n"
-    echo -e "3.再接続できない場合はこのウィンドウでSSH設定またはFW設定を確認してください\n"
+    echo -e "1.接続プロファイルに${YELLOW}ssh_ed25519${NC}を設定して接続してください\n"
+    echo -e "2.再接続できない場合はこのウィンドウでSSH設定またはFW設定を確認してください\n"
     echo
     echo -e "新しいウィンドウで再接続できたらこのウィンドウでEnterを押してください${NC}"
     read -p "Enterを押すとセッションを終了します..."
@@ -351,10 +406,13 @@ echo -e "  ・ssh Port番号変更"
 echo -e "8.fail2banインストールと設定"
 echo -e "9.ufw有効化とsshポート許可設定\n"
 sleep 2
+iniSettings=""
 Gum_Confirm_YesNo "Ubuntu初期設定を開始しますか?" "Yes" "No"
-if [ $iniSettings = "Yes" ]; then
+if [ "$iniSettings" = "Yes" ]; then
     UbuntuSetup
 else
-    echo -e "${YELLOW}Ubuntu初期設定をスキップしました${NC}\n"
+    echo -e "${YELLOW}Ubuntuセキュリティ設定をスキップしました${NC}\n"
     sleep 1
+    tmux has-session -t spokit 2>/dev/null && tmux kill-session -t spokit
+    exit 0
 fi
