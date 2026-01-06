@@ -22,8 +22,15 @@ grafanaInstall(){
         sudo systemctl enable prometheus.service
         sudo systemctl enable prometheus-node-exporter.service
 
-        #sudo ufw allow 3000/tcp
-        #sudo ufw reload
+        if [[ $(sudo ufw status | grep -i active) ]]; then
+            echo "ufwが有効化されているため、Grafana用ポート3000を開放します..."
+            sudo ufw allow 3000/tcp
+            sudo ufw reload
+            echo "ポート3000を開放しました。"
+        else
+            echo "ufwは有効化されていません。"
+            echo "ご自身でGrafana用ポート3000を開放してください。"
+        fi
 
         echo "Grafanaをインストールしました..."
         echo "マニュアルを参考に設定ファイルを作成してください"
@@ -41,4 +48,33 @@ prometheusInstall(){
     echo "$sudopass" | sudo -S apt install -y prometheus-node-exporter
     sudo systemctl enable prometheus-node-exporter.service
     echo "prometheusをインストールしました..."
+
+    #ufw有効の場合
+    if [[ $(sudo ufw status | grep -i active) ]]; then
+        echo "ufwが有効化されているため、メトリクス用ポート9100と12798ポートを開放します..."
+        grafana_ip=$(gum input --width=0 --header="Grafanaをインストールしたサーバーを入力してください" --char-limit=255 --header.foreground="99" --no-show-help --placeholder "IP Address Only")
+
+        # IPv4アドレスの正規表現
+        regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
+
+        # IPアドレスかどうかをチェック
+        if [[ $grafana_ip =~ $regex ]]; then
+            # IP の範囲が 0〜255 かチェック
+            IFS='.' read -r a b c d <<< "$grafana_ip"
+            if ((a <= 255 && b <= 255 && c <= 255 && d <= 255)); then
+                sudo ufw allow from $grafana_ip to any port 12798/tcp
+                sudo ufw allow from $grafana_ip to any port 9100/tcp
+                sudo ufw reload
+                echo "ポート9100と12798を $grafana_ip 限定で開放しました。"
+            else
+                echo "$grafana_ip は無効な IP アドレスです（範囲外）"
+            fi
+        else
+            # IPでなければ 無効
+            echo "$grafana_ip は不正な値です"
+        fi
+    else
+        echo "ufwは有効化されていません。"
+        echo "ご自身でメトリクス用ポート9100と12798ポートを開放してください。"
+    fi
 }
