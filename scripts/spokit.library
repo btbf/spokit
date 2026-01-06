@@ -1,5 +1,5 @@
 #!/bin/bash
-version="0.4.5"
+version="0.4.6"
 env_path=$HOME/spokit/env
 
 

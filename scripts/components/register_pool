@@ -106,7 +106,50 @@ registarPool(){
         Gum_OneSelect "メニューへ戻る"
         return
     fi
-    CheckWallet
+
+    # ウォレット残高確認（新規登録時のみ）
+    if [[ ${1} == "new" ]]; then
+        REQUIRED_BALANCE=500000000  # 500 ADA
+        while :
+        do
+            CheckWallet || {
+                echo "ウォレット情報の取得に失敗しました"
+                Gum_OneSelect "戻る"
+                return 1
+            }
+            
+            if [[ ${total_balance} -lt ${REQUIRED_BALANCE} ]]; then
+                echo "ウォレット残高が不足しています"
+                echo "510 ADA以上の入金を確認してください"
+                echo
+                echo "入金後トランザクションが承認されたらEnterキーを押してください"
+                echo "キャンセルする場合は2を入力してください"
+                read -r -p "> "
+                case "$REPLY" in
+                    2)
+                        echo "キャンセルされました"
+                        Gum_OneSelect "メニューへ戻る"
+                        return
+                        ;;
+                    "")
+                        # Enterキーが押された場合は再チェック
+                        continue
+                        ;;
+                    *)
+                        echo "無効な入力です。再度選択してください"
+                        ;;
+                esac
+            else
+                break
+            fi
+        done
+    else
+        CheckWallet || {
+            echo "ウォレット情報の取得に失敗しました"
+            Gum_OneSelect "戻る"
+            return 1
+        }
+    fi
     currentSlot=$(cardano-cli query tip $NODE_NETWORK | jq -r '.slot')
     
     case ${1} in
