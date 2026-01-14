@@ -331,6 +331,8 @@ logpath = /var/log/auth.log
 maxretry = 3
 EOF
         echo -e "${YELLOW}fail2banを設定しました${NC}\n"
+        sudo systemctl enable --now fail2ban
+        echo -e "${YELLOW}fail2banを有効化しました${NC}\n"
         echo -e "ポート番号: ${GREEN}$port_number${NC} をfail2banに設定しました\n"
         sudo systemctl restart fail2ban
         echo -e "${YELLOW}fail2banを再起動しました${NC}\n"
