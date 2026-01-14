@@ -1,5 +1,5 @@
 #!/bin/bash
-version="0.4.6"
+version="0.4.7"
 env_path=$HOME/spokit/env
 
 
@@ -428,7 +428,7 @@ case $1 in
       "リレー" )
         local loop_count=3
         local header="リレーノード起動に使用する任意のポートを設定してください"
-        port_set="3000 3001 6000 6001"
+        port_set="6000 6001"
       ;;
     esac
     ;;
