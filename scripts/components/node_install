@@ -2,8 +2,8 @@
 
 recommend_node_version="10.5.3"
 recommend_cli_version="10.11.0.0"
-recommend_cabal_vrtsion="3.12.1.0"
-recommend_ghc_vrtsion="9.6.5"
+recommend_cabal_version="3.12.1.0"
+recommend_ghc_version="9.6.5"
 
 
 LibsodiumInstall(){
@@ -75,11 +75,11 @@ GhcupInstall(){
 
   source ${HOME}/.ghcup/env
   ghcup upgrade
-  ghcup install cabal $recommend_cabal_vrtsion
-  ghcup set cabal $recommend_cabal_vrtsion
+  ghcup install cabal $recommend_cabal_version
+  ghcup set cabal $recommend_cabal_version
 
-  ghcup install ghc $recommend_ghc_vrtsion
-  ghcup set ghc $recommend_ghc_vrtsion
+  ghcup install ghc $recommend_ghc_version
+  ghcup set ghc $recommend_ghc_version
 
   cabal update
   cabal --version; ghc --version
@@ -120,7 +120,7 @@ NodeDownload(){
     echo "git tag:$(DglayStyle $1)"
     cabal clean
     cabal update
-    cabal configure --with-compiler=ghc-$recommend_ghc_vrtsion
+    cabal configure --with-compiler=ghc-$recommend_ghc_version
 
     LglayStyle "ソースコードからビルド開始..."
     YellowStyle "この作業は30分以上かかる場合があります"

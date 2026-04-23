@@ -51,7 +51,7 @@ Verify(){
       echo "[1] はい [2] いいえ"
 
       if yes_no; then
-          tar -xzf \${NODE_HOME}/airgap-set.tar.gz --exclude="airgap_script" -C \${NODE_HOME}
+          tar -xzf \${NODE_HOME}/airgap-set.tar.gz --exclude="airgap_script" --no-absolute-file-names -C \${NODE_HOME}
           if [ \$? -ne 0 ]; then
               echo -e "\${RED}airgap-set.tar.gzの解凍に失敗しました。\${NC}"
               rm \${NODE_HOME}/airgap_script
