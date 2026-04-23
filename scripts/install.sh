@@ -128,10 +128,23 @@ clear
 if [ ! -d "${SPOKIT_HOME}" ]; then
     view_title_logo "${spokit_version}" "ノードセットアップ初期設定"
 
-    if [ -d "${NODE_HOME}" ]; then 
+    if [ -d "${NODE_HOME}" ]; then
         echo -e "既存のネットワーク設定が見つかりました : ${NODE_CONFIG}\n"
         work_dir=${NODE_HOME}
-        sync_network=${NODE_CONFIG}
+        # node.cert の有無でノードタイプを自動判定
+        if [ -f "${NODE_HOME}/node.cert" ]; then
+            NODE_TYPE="ブロックプロデューサー"
+        else
+            NODE_TYPE="リレー"
+        fi
+        echo -e "ノードタイプ: ${GREEN}${NODE_TYPE}${NC}\n"
+        # NODE_CONFIG (小文字) を case 用の表示名に変換
+        case "${NODE_CONFIG}" in
+            mainnet ) sync_network="Mainnet" ;;
+            preview ) sync_network="Preview-Testnet" ;;
+            preprod ) sync_network="Preprod-Testnet" ;;
+            *       ) sync_network="${NODE_CONFIG}" ;;
+        esac
     else
         NODE_TYPE=$(gum choose --header.foreground="244" --header="セットアップノードタイプを選択して下さい" "ブロックプロデューサー" "リレー" --no-show-help)
         sync_network=$(gum choose --header.foreground="244" --header="接続ネットワークを選択してください" --no-show-help "Mainnet" "Preview-Testnet" "Preprod-Testnet")
@@ -242,6 +255,13 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
             echo export SPOKIT_INST_DIR="${SPOKIT_INST_DIR}" >> "${HOME}"/.bashrc
             echo export SPOKIT_HOME="${SPOKIT_HOME}" >> "${HOME}"/.bashrc
             echo alias spokit="'${SPOKIT_INST_DIR}/spokit_run.sh'" >> "${HOME}"/.bashrc
+            # SPOKIT 必須の変数が未設定の場合のみ追記
+            if ! grep -q "NODE_NETWORK" "${HOME}/.bashrc"; then
+                echo export NODE_NETWORK="${NODE_NETWORK}" >> "${HOME}"/.bashrc
+            fi
+            if ! grep -q "CARDANO_NODE_NETWORK_ID" "${HOME}/.bashrc"; then
+                echo export CARDANO_NODE_NETWORK_ID="${CARDANO_NODE_NETWORK_ID}" >> "${HOME}"/.bashrc
+            fi
         fi
 
 
