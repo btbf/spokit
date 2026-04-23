@@ -24,7 +24,6 @@ NodeUpdate(){
   printf "  %-22s ${GREEN}%s${NC}\n" "現在 cardano-cli:"  "$cur_cli"
   echo
   printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 node:" "$recommend_node_version"
-  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 cli:"  "$recommend_cli_version"
   echo
 
   # 現在バージョンが推奨バージョン以上の場合は警告
@@ -305,10 +304,8 @@ NodeUpdate(){
   echo
   printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" \
     "$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
-  if [[ -n "$cli_bin" ]]; then
-    printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" \
-      "$(cardano-cli version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
-  fi
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" \
+    "$(cardano-cli version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
   echo
   echo -e "${YELLOW}起動ログ確認:${NC}"
   echo "  sudo journalctl -u cardano-node -f"

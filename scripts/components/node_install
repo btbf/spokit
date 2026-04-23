@@ -197,7 +197,7 @@ NodeInstall(){
   #------------------------------------------------------------
   echo -e "${YELLOW}インストールするバージョン:${NC}"
   printf "  %-16s ${CYAN}%s${NC}\n" "cardano-node:" "$recommend_node_version"
-  printf "  %-16s ${CYAN}%s${NC}\n" "cardano-cli:"  "$recommend_cli_version"
+  printf "  %-16s %s\n"             "cardano-cli:"  "cardano-nodeにパッケージ済み"
   echo
 
   echo -e "${YELLOW}インストール内容:${NC}"
@@ -242,7 +242,6 @@ NodeInstall(){
   echo -e "${YELLOW}  インストール内容の確認${NC}"
   echo -e "${WHITE}============================================${NC}"
   printf "  %-20s ${CYAN}%s${NC}\n"  "cardano-node:"     "$recommend_node_version"
-  printf "  %-20s ${CYAN}%s${NC}\n"  "cardano-cli:"      "$recommend_cli_version"
   printf "  %-20s %s\n"              "ノードタイプ:"     "$NODE_TYPE"
   printf "  %-20s %s\n"              "ネットワーク:"     "$NODE_CONFIG"
   printf "  %-20s %s\n"              "ポート番号:"       "$port_number"
@@ -493,7 +492,7 @@ EOF
   echo
   printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" \
     "$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
-  [[ -n "$cli_bin" ]] && printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" \
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" \
     "$(cardano-cli version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
   echo
   echo -e "${YELLOW}起動ログ確認:${NC}"
