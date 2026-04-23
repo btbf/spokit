@@ -167,6 +167,12 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
 
     if [ $? -ne 0 ]; then
         echo -e "${RED}SPOKITのダウンロードに失敗しました。インターネット接続を確認してください。${NC}"
+        rm -f spokit.tar.gz
+        exit 1
+    fi
+    if ! gzip -t spokit.tar.gz 2>/dev/null; then
+        echo -e "${RED}ダウンロードファイルが破損しています。再度お試しください。${NC}"
+        rm -f spokit.tar.gz
         exit 1
     fi
     tar -xzf spokit.tar.gz
@@ -212,9 +218,7 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
     style "作業ディレクトリ:" "${work_dir}"
     style "UFWステータス:" "${UFW_STATUS}"
     echo
-    gum confirm "この設定でよろしいですか？" --default=true --no-show-help --affirmative="はい" --negative="いいえ" && iniSettings="Yes" || iniSettings="No"
-
-    if [ "${iniSettings}" == "Yes" ]; then
+    if gum confirm "この設定でよろしいですか？" --default=true --no-show-help --affirmative="はい" --negative="いいえ"; then
         if [ ! -d "$NODE_HOME" ]; then
             echo "環境変数を追加します"
             echo PATH="$HOME/.local/bin:$PATH" >> "${HOME}"/.bashrc

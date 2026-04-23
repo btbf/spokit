@@ -13,8 +13,7 @@ createMetadata(){
         style "プール説明:" "${POOL_DISCRIPTION}"
         style "プールURL:" "${POOL_HOMEPAGE_URL}"
         echo
-        Gum_Confirm_YesNo "プールメタデータを再作成しますか？" "Yes" "No"
-        if [ "${iniSettings}" == "Yes" ]; then
+        if Gum_Confirm "プールメタデータを再作成しますか？"; then
             poolMeta_reright=true
         else
             return
@@ -32,9 +31,7 @@ createMetadata(){
     style "メタデータファイル名:" "${metaFileName}"
     
     echo
-    Gum_Confirm_YesNo "この値でよろしいですか？" "Yes" "最初からやり直す場合はツールを再実行してください"
-
-    if [ "${iniSettings}" == "Yes" ]; then
+    if Gum_Confirm "この値でよろしいですか？"; then
         if $poolMeta_reright ; then
             sed -i '/^POOL_NAME=/d' "${env_path}"
             sed -i '/^POOL_TICKER=/d' "${env_path}"
@@ -73,9 +70,7 @@ createMetadata(){
                     echo "サーバでホストされている${metaFileName}を参照しています"
                     curl -s "${poolMetaurl}" | jq .
                     echo
-                    Gum_Confirm_YesNo "このデータでよろしいですか？" "Yes" "最初からやり直す場合はツールを再実行してください"
-                    
-                    if [[ ${iniSettings} == "Yes" ]]; then
+                    if Gum_Confirm "このデータでよろしいですか？"; then
                         echo "オンラインファイルのフォーマットは正常です"
                         sed -i '/^POOL_METADATA_URL=/d' "${env_path}"
                         echo "POOL_METADATA_URL=\"${poolMetaurl}\"" >> "${env_path}"
@@ -86,7 +81,7 @@ createMetadata(){
                         break 2
                     else
                         echo
-                        echo "${iniSettings}"
+                        echo "最初からやり直す場合はツールを再実行してください"
                         echo
                         Gum_OneSelect "戻る"
                     fi
@@ -104,7 +99,7 @@ createMetadata(){
         done
     else
         echo
-        echo "${iniSettings}"
+        echo "最初からやり直す場合はツールを再実行してください"
         echo
         Gum_OneSelect "戻る"
     fi

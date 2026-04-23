@@ -76,11 +76,10 @@ registarPool(){
         echo "${pooldata_chk}" | jq -r '.[].meta_url' | awk '{print "メタデータURL:"$1}'
         echo
         if [[ ${1} == "renewal" ]]; then
-            Gum_Confirm_YesNo "プール情報を変更しますか？" "Yes" "No"
-            if [[ ${iniSettings} != "Yes" ]]; then
-            echo "キャンセルされました"
-            Gum_OneSelect "メニューへ戻る"
-            return
+            if ! Gum_Confirm "プール情報を変更しますか？"; then
+                echo "キャンセルされました"
+                Gum_OneSelect "メニューへ戻る"
+                return
             fi
         else
             echo "プールIDは既にオンチェーンに登録されています"
@@ -92,8 +91,7 @@ registarPool(){
         echo "プールIDはオンチェーンに登録されていません"
         style "プールID:" "$(cat ${NODE_HOME}/${POOL_ID_BECH32_FILENAME})"
         echo
-        Gum_Confirm_YesNo "プール登録を続行しますか？" "Yes" "No"
-        if [[ ${iniSettings} != "Yes" ]]; then
+        if ! Gum_Confirm "プール登録を続行しますか？"; then
             echo "キャンセルされました"
             Gum_OneSelect "メニューへ戻る"
             return
