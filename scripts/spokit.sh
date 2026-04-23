@@ -35,7 +35,7 @@ PoolSetupMenu(){
       do
       clear
       Header $headerTitle
-      selection=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ノードインストール" "[2] トポロジー設定" "[3] プール運用キー作成" "[4] ウォレット入金" "[5] ステークアドレス登録" "[6] プールメタデータ作成" "[7] プール登録" "[8] 監視ツールセットアップ" "[q] 終了")
+      selection=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ノードインストール" "[2] トポロジー設定" "[3] プール運用キー作成" "[4] ウォレット入金" "[5] ステークアドレス登録" "[6] プールメタデータ作成" "[7] プール登録" "[8] 監視ツールセットアップ" "[9] ブロックログインストール" "[q] 終了")
       case $selection in
         "[1] ノードインストール" )
             NodeInstall
@@ -67,6 +67,10 @@ PoolSetupMenu(){
 
         "[8] 監視ツールセットアップ" )
             prometheusInstall
+        ;;
+
+        "[9] ブロックログインストール" )
+            BlocklogFullSetup
         ;;
 
         "[q] 終了" )

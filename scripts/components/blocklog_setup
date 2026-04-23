@@ -12,11 +12,55 @@ _blk_sed_escape(){
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
 
+#------------------------------------------------------------------------------
+# CNCLI バイナリをダウンロード・インストール (共通内部関数)
+# 引数1: インストール先ディレクトリ (省略時 ~/.cargo/bin)
+# 戻り値: 0=成功, 1=失敗
+#------------------------------------------------------------------------------
+_blk_cncli_install(){
+  local install_dir="${1:-$HOME/.cargo/bin}"
+
+  LglayStyle "CNCLI の最新バージョンを確認中..."
+  local cncli_release
+  cncli_release=$(curl -s --max-time 10 \
+    https://api.github.com/repos/cardano-community/cncli/releases/latest \
+    | jq -r '.tag_name' | sed -e "s/^.\{1\}//")
+  if [[ -z "$cncli_release" || "$cncli_release" == "null" ]]; then
+    echo -e "${RED}CNCLI のバージョン取得に失敗しました。インターネット接続を確認してください。${NC}"
+    return 1
+  fi
+
+  local cncli_tar="$HOME/cncli-${cncli_release}-x86_64-unknown-linux-gnu.tar.gz"
+  local cncli_url="https://github.com/cardano-community/cncli/releases/download/v${cncli_release}/cncli-${cncli_release}-ubuntu22-x86_64-unknown-linux-gnu.tar.gz"
+
+  gum spin --spinner dot --title "CNCLI v${cncli_release} をダウンロード中..." -- \
+    curl -sLJ "$cncli_url" -o "$cncli_tar"
+  if [ $? -ne 0 ] || ! gzip -t "$cncli_tar" 2>/dev/null; then
+    echo -e "${RED}CNCLI のダウンロードに失敗しました${NC}"
+    rm -f "$cncli_tar"
+    return 1
+  fi
+  mkdir -p "$install_dir"
+  tar xzf "$cncli_tar" -C "$install_dir/" 2>/dev/null
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}CNCLI の展開に失敗しました${NC}"
+    rm -f "$cncli_tar"
+    return 1
+  fi
+  rm -f "$cncli_tar"
+  export PATH="$install_dir:$PATH"
+  DglayStyle "CNCLI v${cncli_release} をインストールしました"
+  return 0
+}
+
+
 #==============================================================================
 # ブロックログセットアップ
+# 引数1: "no_pause" を渡すと成功時の「戻る」を省略 (BlocklogFullSetup から利用)
 #==============================================================================
 
 BlocklogInstall(){
+  local _no_pause="${1:-}"
   clear
   Header "ブロックログセットアップ"
 
@@ -94,7 +138,6 @@ BlocklogInstall(){
     rustup default stable
     rustup update
     rustup component add clippy rustfmt
-    # .bashrc に cargo/env を追記
     if ! grep -q "cargo/env" "$HOME/.bashrc"; then
       echo 'source "$HOME/.cargo/env"' >> "$HOME/.bashrc"
     fi
@@ -108,38 +151,10 @@ BlocklogInstall(){
   # 2. CNCLI インストール
   #------------------------------------------------------------
   if ! command -v cncli >/dev/null 2>&1; then
-    LglayStyle "CNCLI のバージョンを確認中..."
-    local cncli_release
-    cncli_release=$(curl -s --max-time 10 \
-      https://api.github.com/repos/cardano-community/cncli/releases/latest \
-      | jq -r '.tag_name' | sed -e "s/^.\{1\}//")
-    if [[ -z "$cncli_release" || "$cncli_release" == "null" ]]; then
-      echo -e "${RED}CNCLI のバージョン取得に失敗しました。インターネット接続を確認してください。${NC}"
+    if ! _blk_cncli_install "$HOME/.cargo/bin"; then
       Gum_OneSelect "戻る"
       return
     fi
-
-    local cncli_tar="$HOME/cncli-${cncli_release}-x86_64-unknown-linux-gnu.tar.gz"
-    local cncli_url="https://github.com/cardano-community/cncli/releases/download/v${cncli_release}/cncli-${cncli_release}-ubuntu22-x86_64-unknown-linux-gnu.tar.gz"
-
-    gum spin --spinner dot --title "CNCLI v${cncli_release} をダウンロード中..." -- \
-      curl -sLJ "$cncli_url" -o "$cncli_tar"
-    if [ $? -ne 0 ] || ! gzip -t "$cncli_tar" 2>/dev/null; then
-      echo -e "${RED}CNCLI のダウンロードに失敗しました${NC}"
-      rm -f "$cncli_tar"
-      Gum_OneSelect "戻る"
-      return
-    fi
-    tar xzf "$cncli_tar" -C "$HOME/.cargo/bin/" 2>/dev/null
-    if [ $? -ne 0 ]; then
-      echo -e "${RED}CNCLI の展開に失敗しました${NC}"
-      rm -f "$cncli_tar"
-      Gum_OneSelect "戻る"
-      return
-    fi
-    rm -f "$cncli_tar"
-    export PATH="$HOME/.cargo/bin:$PATH"
-    DglayStyle "CNCLI v${cncli_release} をインストールしました"
   else
     echo -e "CNCLI: ${GREEN}$(cncli --version 2>/dev/null | head -1)${NC}"
   fi
@@ -383,15 +398,17 @@ EOF
   echo "  2. cnclilog でDBの同期状況を確認 (100%になるまで待機)"
   echo "  3. 同期完了後、blocks コマンドでブロックログを確認"
   echo
-  Gum_OneSelect "戻る"
+  [[ -z "$_no_pause" ]] && Gum_OneSelect "戻る"
 }
 
 
 #==============================================================================
 # ブロック通知設定
+# 引数1: "no_pause" を渡すと成功時の「戻る」を省略 (BlocklogFullSetup から利用)
 #==============================================================================
 
 BlockNotifyInstall(){
+  local _no_pause="${1:-}"
   clear
   Header "ブロック通知設定"
 
@@ -489,12 +506,11 @@ BlockNotifyInstall(){
     cp -r "${bn_src}/i18n" "$bn_dir/"
     rm -rf "${bn_src}" "${bn_release}.tar.gz"
     DglayStyle "block-notify v${bn_release} に更新しました"
-    # 更新時はサービス再起動して終了
     sudo systemctl restart cnode-blocknotify.service
     echo
     YellowStyle "ブロック通知を更新しました"
     echo
-    Gum_OneSelect "戻る"
+    [[ -z "$_no_pause" ]] && Gum_OneSelect "戻る"
     return
   else
     # 新規: 全ファイル展開
@@ -550,9 +566,9 @@ BlockNotifyInstall(){
     "ExceptConfirm (確認済み以外を通知)" \
     "OnlyMissed    (ミスのみ通知)") || return
   case "$notify_level_label" in
-    All*)          notify_level_val="All" ;;
+    All*)           notify_level_val="All" ;;
     ExceptConfirm*) notify_level_val="ExceptConfirm" ;;
-    OnlyMissed*)   notify_level_val="OnlyMissed" ;;
+    OnlyMissed*)    notify_level_val="OnlyMissed" ;;
   esac
 
   # 次エポックスケジュール通知形式
@@ -724,20 +740,53 @@ EOF
   echo
   YellowStyle "ブロック通知の設定が完了しました"
   echo
-  echo -e "${YELLOW}設定内容:${NC}"
-  printf "  %-18s %s\n" "ティッカー:"     "$pool_ticker"
-  printf "  %-18s %s\n" "プラットフォーム:" "$notify_platform"
-  printf "  %-18s %s\n" "通知レベル:"     "$notify_level_val"
+  printf "  %-20s %s\n" "ティッカー:"       "$pool_ticker"
+  printf "  %-20s %s\n" "プラットフォーム:" "$notify_platform"
+  printf "  %-20s %s\n" "通知レベル:"       "$notify_level_val"
   echo
-  echo -e "${YELLOW}起動ログ確認:${NC}"
-  echo "  journalctl --no-hostname -u cnode-blocknotify -f"
+  [[ -z "$_no_pause" ]] && Gum_OneSelect "戻る"
+}
+
+
+#==============================================================================
+# ブロックログ一括セットアップ (spokit pool [9] 用)
+# CNCLI → ブロック通知 を続けてセットアップする
+#==============================================================================
+
+BlocklogFullSetup(){
+  # Step 1: CNCLI / systemd サービスインストール
+  BlocklogInstall "no_pause"
+
+  # CNCLI インストール失敗 (サービスが存在しない) ならここで終了
+  if [ ! -f "/etc/systemd/system/cnode-cncli-sync.service" ]; then
+    return
+  fi
+
+  echo
+  echo -e "${WHITE}============================================${NC}"
+  echo -e "${YELLOW}  次にブロック通知の設定を行います${NC}"
+  echo -e "${WHITE}============================================${NC}"
+  echo
+  sleep 2
+
+  # Step 2: ブロック通知インストール
+  BlockNotifyInstall "no_pause"
+
+  echo
+  echo -e "${WHITE}============================================${NC}"
+  YellowStyle "ブロックログの一括セットアップが完了しました"
+  echo -e "${WHITE}============================================${NC}"
+  echo
+  echo -e "${YELLOW}エイリアスを有効化してください:${NC}"
+  echo "  source ~/.bashrc"
   echo
   Gum_OneSelect "戻る"
 }
 
 
 #==============================================================================
-# ブロックログメインメニュー
+# ブロックログ管理メニュー (spokit [4] 用)
+# CNCLI バージョン確認・アップデート + ブロック通知設定サブメニュー
 #==============================================================================
 
 BlocklogMenu(){
@@ -746,22 +795,53 @@ BlocklogMenu(){
     clear
     Header "ブロックログ管理"
 
-    # インストール状況サマリー
-    local cncli_status blocknotify_status
+    # --- CNCLI バージョン確認 ---
+    local cncli_installed="" cncli_latest="" cncli_status_msg update_available=false
     if command -v cncli >/dev/null 2>&1 && \
        [ -f "/etc/systemd/system/cnode-cncli-sync.service" ]; then
-      cncli_status="${GREEN}インストール済み ($(cncli --version 2>/dev/null | head -1))${NC}"
+      cncli_installed=$(cncli --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)
+      cncli_latest=$(curl -s --max-time 5 \
+        https://api.github.com/repos/cardano-community/cncli/releases/latest \
+        | jq -r '.tag_name' | sed 's/^v//' 2>/dev/null)
+      if [[ -n "$cncli_latest" && "$cncli_latest" != "null" ]]; then
+        if [[ "$cncli_installed" == "$cncli_latest" ]]; then
+          cncli_status_msg="${GREEN}v${cncli_installed} (最新)${NC}"
+        else
+          cncli_status_msg="${YELLOW}v${cncli_installed} → v${cncli_latest} にアップデート可能${NC}"
+          update_available=true
+        fi
+      else
+        cncli_status_msg="${GREEN}v${cncli_installed}${NC}"
+      fi
     else
-      cncli_status="${YELLOW}未インストール${NC}"
+      cncli_status_msg="${RED}未インストール${NC}"
     fi
+
+    # --- ブロック通知状況 ---
+    local bn_status_msg
     if [ -f "/etc/systemd/system/cnode-blocknotify.service" ]; then
-      blocknotify_status="${GREEN}設定済み${NC}"
+      local bn_active
+      bn_active=$(systemctl is-active cnode-blocknotify.service 2>/dev/null)
+      if [[ "$bn_active" == "active" ]]; then
+        bn_status_msg="${GREEN}稼働中${NC}"
+      else
+        bn_status_msg="${YELLOW}停止中${NC}"
+      fi
     else
-      blocknotify_status="${YELLOW}未設定${NC}"
+      bn_status_msg="${RED}未設定${NC}"
     fi
-    echo -e "ブロックログ: $(eval echo -e "$cncli_status")"
-    echo -e "ブロック通知: $(eval echo -e "$blocknotify_status")"
+
+    echo -e "CNCLI:        $(eval echo -e "$cncli_status_msg")"
+    echo -e "ブロック通知: $(eval echo -e "$bn_status_msg")"
     echo
+
+    # --- 動的メニュー構築 ---
+    local menu_items=()
+    if [[ "$update_available" == "true" ]]; then
+      menu_items+=("[1] CNCLIをアップデートする")
+    fi
+    menu_items+=("[2] ブロック通知設定")
+    menu_items+=("[q] 戻る")
 
     local selection
     selection=$(gum filter --height=6 --no-show-help \
@@ -769,13 +849,18 @@ BlocklogMenu(){
       --indicator=">" \
       --placeholder="番号選択も可..." \
       --prompt="◉ " \
-      "[1] ブロックログセットアップ" \
-      "[2] ブロック通知設定" \
-      "[q] 戻る") || break
+      "${menu_items[@]}") || break
 
     case "$selection" in
-      "[1] ブロックログセットアップ" )
-        BlocklogInstall
+      "[1] CNCLIをアップデートする" )
+        clear
+        Header "CNCLI アップデート"
+        if _blk_cncli_install "$HOME/.cargo/bin"; then
+          echo
+          DglayStyle "CNCLI を v${cncli_latest} にアップデートしました"
+          echo
+        fi
+        Gum_OneSelect "戻る"
         ;;
       "[2] ブロック通知設定" )
         BlockNotifyInstall
