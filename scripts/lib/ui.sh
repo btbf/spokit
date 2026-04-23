@@ -85,7 +85,7 @@ Gum_DotSpinner(){
 Gum_Fnspin(){
   local TITLE="${*: -1}"
   local COMMANDO="${*:1:$(($# - 1))}"
-  gum spin --spinner="dot" --title="$TITLE" --show-output -- bash -c "source ../spokit.library && $COMMANDO"
+  gum spin --spinner="dot" --title="$TITLE" --show-output -- bash -c "source \"${SPOKIT_INST_DIR}/spokit.library\" && ${COMMANDO}"
 }
 
 Gum_OneSelect(){

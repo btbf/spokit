@@ -152,8 +152,8 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
     #Spokitインストール
     
     printf "${YELLOW}SPOKITをインストール...${NC}\n"
-    mkdir -p $HOME/git
-    cd $HOME/git
+    mkdir -p "$HOME/git"
+    cd "$HOME/git" || exit 1
 
     if [[ "$SPOKIT_MODE" == "develop" ]]; then
         echo "🧪 SPOKIT Develop Mode"
@@ -182,7 +182,7 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
     fi
     rm spokit.tar.gz
     sudo mkdir -p ${SPOKIT_INST_DIR}
-    cd spokit-${spokit_version}/scripts
+    cd "spokit-${spokit_version}/scripts" || exit 1
     sudo cp -pR ./* ${SPOKIT_INST_DIR}
 
     chmod 755 ${SPOKIT_INST_DIR}/spokit_run.sh
