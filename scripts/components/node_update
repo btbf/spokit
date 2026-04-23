@@ -3,17 +3,14 @@
 
 #==============================================================================
 # node_update - cardano-node プレビルドバイナリアップデート
-# アップデート先バージョンは SPOKIT 推奨バージョンに固定
+# アップデート先バージョンは node_install の recommend_node_version を使用
 #==============================================================================
-
-recommend_update_node_version="10.5.3"
-recommend_update_cli_version="10.11.0.0"
 
 NodeUpdate(){
   clear
   Header "ノードアップデート"
 
-  local target_version="$recommend_update_node_version"
+  local target_version="$recommend_node_version"
 
   #------------------------------------------------------------
   # 現在インストール済みのバージョン表示
@@ -26,13 +23,22 @@ NodeUpdate(){
   printf "  %-22s ${GREEN}%s${NC}\n" "現在 cardano-node:" "$cur_node"
   printf "  %-22s ${GREEN}%s${NC}\n" "現在 cardano-cli:"  "$cur_cli"
   echo
-  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 node:"  "$recommend_update_node_version"
-  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 cli:"   "$recommend_update_cli_version"
+  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 node:" "$recommend_node_version"
+  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 cli:"  "$recommend_cli_version"
   echo
 
-  # すでに推奨バージョンがインストール済みの場合は警告
-  if [[ "$cur_node" == "$target_version" ]]; then
-    echo -e "${YELLOW}すでにSPOKIT推奨バージョン (${target_version}) がインストールされています${NC}"
+  # 現在バージョンが推奨バージョン以上の場合は警告
+  if [[ "$cur_node" != "不明" ]] && \
+     [[ "$(printf '%s\n' "$recommend_node_version" "$cur_node" | sort -V | head -1)" == "$recommend_node_version" ]] && \
+     [[ "$cur_node" != "$recommend_node_version" ]]; then
+    echo -e "${YELLOW}現在のバージョン (${cur_node}) はSPOKIT推奨バージョン (${recommend_node_version}) より新しいです${NC}"
+    echo
+    if ! Gum_Confirm "それでもアップデートを実行しますか？"; then
+      return
+    fi
+    echo
+  elif [[ "$cur_node" == "$recommend_node_version" ]]; then
+    echo -e "${YELLOW}すでにSPOKIT推奨バージョン (${recommend_node_version}) がインストールされています${NC}"
     echo
     if ! Gum_Confirm "それでもアップデートを実行しますか？"; then
       return
