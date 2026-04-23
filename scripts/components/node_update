@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2086,SC1001,SC2317
+
+#==============================================================================
+# node_update - cardano-node プレビルドバイナリアップデート
+#==============================================================================
+
+NodeUpdate(){
+  clear
+  Header "ノードアップデート"
+
+  #------------------------------------------------------------
+  # 現在インストール済みのバージョン表示
+  #------------------------------------------------------------
+  local cur_node cur_cli
+  cur_node=$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "不明")
+  cur_cli=$(cardano-cli  version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "不明")
+
+  echo -e "${YELLOW}現在インストール済みのバージョン:${NC}"
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" "$cur_node"
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:"  "$cur_cli"
+  echo
+
+  #------------------------------------------------------------
+  # GitHub から最新バージョンを取得
+  #------------------------------------------------------------
+  local latest_version=""
+  latest_version=$(curl -s --max-time 10 \
+    https://api.github.com/repos/IntersectMBO/cardano-node/releases/latest \
+    | jq -r '.tag_name' | sed 's/^v//' 2>/dev/null)
+  if [[ -z "$latest_version" || "$latest_version" == "null" ]]; then
+    echo -e "${YELLOW}GitHubからの最新バージョン取得に失敗しました。バージョンを手動で入力してください。${NC}"
+    latest_version=""
+  else
+    echo -e "GitHubの最新バージョン: ${GREEN}${latest_version}${NC}"
+  fi
+  echo
+
+  #------------------------------------------------------------
+  # アップデート先バージョン入力
+  #------------------------------------------------------------
+  local target_version
+  target_version=$(gum input \
+    --value="${latest_version}" \
+    --width=0 \
+    --no-show-help \
+    --header="アップデート先のバージョンを入力してください" \
+    --header.foreground="99" \
+    --placeholder="例: 10.6.4")
+  if [[ -z "$target_version" ]]; then
+    echo -e "${RED}バージョンが入力されていません${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+  echo
+
+  #------------------------------------------------------------
+  # バイナリダウンロード
+  #------------------------------------------------------------
+  local dl_dir="$HOME/git/cardano-node-update"
+  rm -rf "$dl_dir" && mkdir -p "$dl_dir"
+
+  local tar_url="https://github.com/IntersectMBO/cardano-node/releases/download/${target_version}/cardano-node-${target_version}-linux-amd64.tar.gz"
+  local tar_file="$dl_dir/cardano-node-${target_version}-linux-amd64.tar.gz"
+
+  gum spin --spinner dot \
+    --title "cardano-node v${target_version} をダウンロード中..." -- \
+    wget -q "$tar_url" -O "$tar_file"
+  if [ $? -ne 0 ] || ! gzip -t "$tar_file" 2>/dev/null; then
+    echo -e "${RED}ダウンロードに失敗しました。バージョン番号を確認してください: ${target_version}${NC}"
+    rm -rf "$dl_dir"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  gum spin --spinner dot --title "展開中..." -- \
+    tar zxf "$tar_file" -C "$dl_dir" \
+      ./bin/cardano-node \
+      ./bin/cardano-cli \
+      ./bin/snapshot-converter 2>/dev/null
+  # snapshot-converter が存在しないバージョンでも tar はエラーを返さない
+  if [ $? -ne 0 ]; then
+    # ./bin/ 形式でなければフラット展開を試みる
+    tar zxf "$tar_file" -C "$dl_dir" 2>/dev/null || true
+  fi
+  rm -f "$tar_file"
+
+  #------------------------------------------------------------
+  # 展開したバイナリのバージョン確認
+  #------------------------------------------------------------
+  local node_bin cli_bin
+  node_bin=$(find "$dl_dir" -type f -name "cardano-node" 2>/dev/null | head -1)
+  cli_bin=$(find  "$dl_dir" -type f -name "cardano-cli"  2>/dev/null | head -1)
+
+  if [[ -z "$node_bin" ]]; then
+    echo -e "${RED}cardano-node バイナリが見つかりません。アーカイブの内容を確認してください。${NC}"
+    rm -rf "$dl_dir"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  local new_node new_cli
+  new_node=$("$node_bin" version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "確認失敗")
+  new_cli=$( [[ -n "$cli_bin" ]] && "$cli_bin"  version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "なし")
+
+  echo -e "${YELLOW}ダウンロードしたバイナリのバージョン:${NC}"
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" "$new_node"
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:"  "$new_cli"
+  echo
+
+  #------------------------------------------------------------
+  # 設定ファイル更新の選択
+  #------------------------------------------------------------
+  local update_config=false
+  echo -e "${YELLOW}設定ファイル更新について${NC}"
+  echo "  SPO JAPAN GUILD から ${target_version} 用の設定ファイルを取得します"
+  echo "  対象: ${NODE_CONFIG}-config.json / ${NODE_CONFIG}-checkpoints.json"
+  echo "  現在のファイルは backup/ にバックアップされます"
+  echo
+  if Gum_Confirm "設定ファイルも更新しますか？"; then
+    update_config=true
+  fi
+  echo
+
+  #------------------------------------------------------------
+  # DB同期方法の選択
+  #------------------------------------------------------------
+  echo -e "${YELLOW}DB同期方法について${NC}"
+  echo "  Mithril: DBを削除してスナップショットから最速復元 (30分以上)"
+  echo "  通常起動: 既存DBからそのまま継続同期"
+  echo
+  local sync_method
+  sync_method=$(gum choose --height=4 --no-show-help \
+    --header="DB同期方法を選択してください" \
+    --header.foreground="244" \
+    "通常起動 (既存DBから継続同期)" \
+    "Mithrilスナップショットで復元 (DB削除・最速同期)") || {
+      rm -rf "$dl_dir"; return
+    }
+  echo
+
+  #------------------------------------------------------------
+  # 最終確認
+  #------------------------------------------------------------
+  echo -e "${WHITE}============================================${NC}"
+  echo -e "${YELLOW}  アップデート内容の確認${NC}"
+  echo -e "${WHITE}============================================${NC}"
+  printf "  %-22s ${GREEN}%s → %s${NC}\n" "cardano-node:" "$cur_node" "$new_node"
+  if [[ -n "$cli_bin" ]]; then
+    printf "  %-22s ${GREEN}%s → %s${NC}\n" "cardano-cli:"  "$cur_cli"  "$new_cli"
+  fi
+  printf "  %-22s %s\n" "設定ファイル更新:" "$([[ "$update_config" == true ]] && echo "する (spojapanguild)" || echo "しない")"
+  printf "  %-22s %s\n" "DB同期:" "$([[ "$sync_method" == *Mithril* ]] && echo "Mithrilで復元" || echo "既存DBから継続同期")"
+  echo -e "${WHITE}============================================${NC}"
+  echo
+
+  if ! Gum_Confirm "この内容でアップデートを実行しますか？"; then
+    rm -rf "$dl_dir"
+    return
+  fi
+
+  #------------------------------------------------------------
+  # STEP 1: ノード停止
+  #------------------------------------------------------------
+  LglayStyle "cardano-node を停止中..."
+  sudo systemctl stop cardano-node
+  sleep 3
+  DglayStyle "cardano-node を停止しました"
+  echo
+
+  #------------------------------------------------------------
+  # STEP 2: バイナリ配置
+  #------------------------------------------------------------
+  LglayStyle "バイナリを配置中..."
+  sudo cp "$node_bin" /usr/local/bin/cardano-node
+  if [[ -n "$cli_bin" ]]; then
+    sudo cp "$cli_bin" /usr/local/bin/cardano-cli
+  fi
+  local snap_conv
+  snap_conv=$(find "$dl_dir" -type f -name "snapshot-converter" 2>/dev/null | head -1)
+  if [[ -n "$snap_conv" ]]; then
+    sudo cp "$snap_conv" /usr/local/bin/snapshot-converter
+  fi
+  rm -rf "$dl_dir"
+  DglayStyle "バイナリを配置しました"
+  echo -e "  cardano-node: ${GREEN}$(cardano-node version 2>/dev/null | head -1)${NC}"
+  if [[ -n "$cli_bin" ]]; then
+    echo -e "  cardano-cli:  ${GREEN}$(cardano-cli  version 2>/dev/null | head -1)${NC}"
+  fi
+  echo
+
+  #------------------------------------------------------------
+  # STEP 3: 設定ファイル更新
+  #------------------------------------------------------------
+  if [[ "$update_config" == "true" ]]; then
+    LglayStyle "設定ファイルをバックアップ・更新中..."
+    mkdir -p "$NODE_HOME/backup"
+    local config_base="https://spojapanguild.net/node_config/${target_version}"
+    local today
+    today=$(date +%Y%m%d)
+
+    for fname in "${NODE_CONFIG}-config.json" "${NODE_CONFIG}-checkpoints.json"; do
+      # バックアップ
+      if [ -f "$NODE_HOME/${fname}" ]; then
+        cp "$NODE_HOME/${fname}" "$NODE_HOME/backup/${fname}.${today}"
+      fi
+      # ダウンロード
+      if wget -q "${config_base}/${fname}" -O "$NODE_HOME/${fname}" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} ${fname}"
+      else
+        echo -e "  ${YELLOW}⚠ ${fname} の取得に失敗しました。バックアップを維持します。${NC}"
+        cp "$NODE_HOME/backup/${fname}.${today}" "$NODE_HOME/${fname}" 2>/dev/null || true
+      fi
+    done
+    DglayStyle "設定ファイルを更新しました"
+    echo
+  fi
+
+  #------------------------------------------------------------
+  # STEP 4: Mithrilスナップショット復元 (選択時のみ)
+  #------------------------------------------------------------
+  if [[ "$sync_method" == *Mithril* ]]; then
+    echo -e "${WHITE}--------------------------------------------${NC}"
+    LglayStyle "Mithrilスナップショット復元を開始します..."
+    echo -e "${YELLOW}この作業は30分以上かかる場合があります${NC}"
+    echo
+
+    # mithril-client を最新版にインストール/更新
+    mkdir -p "$HOME/git"
+    cd "$HOME/git" || true
+    local mithril_release
+    mithril_release=$(curl -s --max-time 10 \
+      https://api.github.com/repos/input-output-hk/mithril/releases/latest | jq -r '.tag_name')
+    if [[ -n "$mithril_release" && "$mithril_release" != "null" ]]; then
+      gum spin --spinner dot --title "mithril-client ${mithril_release} をダウンロード中..." -- \
+        wget -q \
+          "https://github.com/input-output-hk/mithril/releases/download/${mithril_release}/mithril-${mithril_release}-linux-x64.tar.gz" \
+          -O mithril.tar.gz
+      if gzip -t mithril.tar.gz 2>/dev/null; then
+        tar zxf mithril.tar.gz mithril-client > /dev/null 2>&1
+        sudo cp mithril-client /usr/local/bin/mithril-client
+        sudo chmod +x /usr/local/bin/mithril-client
+        rm -f mithril.tar.gz mithril-client
+        echo -e "  mithril-client: ${GREEN}$(mithril-client -V 2>/dev/null)${NC}"
+      else
+        echo -e "${YELLOW}mithril-client のダウンロードをスキップ (既存を使用)${NC}"
+        rm -f mithril.tar.gz
+      fi
+    fi
+
+    # ネットワーク別エンドポイント設定
+    local mithril_network
+    case "${NODE_CONFIG}" in
+      mainnet) mithril_network="release-mainnet" ;;
+      preprod) mithril_network="release-preprod" ;;
+      preview) mithril_network="pre-release-preview" ;;
+      *)       mithril_network="release-mainnet" ;;
+    esac
+
+    export AGGREGATOR_ENDPOINT="https://aggregator.${mithril_network}.api.mithril.network/aggregator"
+
+    GENESIS_VERIFICATION_KEY=$(wget -q -O - \
+      "https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/genesis.vkey" \
+      2>/dev/null)
+    export GENESIS_VERIFICATION_KEY
+
+    ANCILLARY_VERIFICATION_KEY=$(wget -q -O - \
+      "https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/ancillary.vkey" \
+      2>/dev/null)
+    export ANCILLARY_VERIFICATION_KEY
+    export SNAPSHOT_DIGEST="latest"
+
+    if [[ -z "$GENESIS_VERIFICATION_KEY" || -z "$ANCILLARY_VERIFICATION_KEY" ]]; then
+      echo -e "${RED}Mithril検証キーの取得に失敗しました。ノードを通常起動します。${NC}"
+    else
+      LglayStyle "既存DBを削除中..."
+      rm -rf "$NODE_HOME/db"
+      echo
+      LglayStyle "Mithrilスナップショットをダウンロード中..."
+      mithril-client cardano-db download \
+        --download-dir "${NODE_HOME}" \
+        --include-ancillary latest
+      if [ $? -ne 0 ]; then
+        echo -e "${RED}スナップショットのダウンロードに失敗しました${NC}"
+        echo -e "${YELLOW}ノードを起動して通常同期で復旧してください${NC}"
+      else
+        DglayStyle "スナップショットを復元しました"
+      fi
+    fi
+    echo
+  fi
+
+  #------------------------------------------------------------
+  # STEP 5: ノード起動
+  #------------------------------------------------------------
+  LglayStyle "cardano-node を起動中..."
+  sudo systemctl start cardano-node
+  sleep 5
+
+  local node_active
+  node_active=$(systemctl is-active cardano-node 2>/dev/null)
+  if [[ "$node_active" == "active" ]]; then
+    DglayStyle "cardano-node が起動しました"
+  else
+    echo -e "${RED}cardano-node の起動に問題があります。ログを確認してください。${NC}"
+    echo "  sudo journalctl -u cardano-node -n 50"
+  fi
+
+  #------------------------------------------------------------
+  # 完了サマリー
+  #------------------------------------------------------------
+  echo
+  echo -e "${WHITE}============================================${NC}"
+  YellowStyle "ノードアップデート完了"
+  echo -e "${WHITE}============================================${NC}"
+  echo
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" \
+    "$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
+  if [[ -n "$cli_bin" ]]; then
+    printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" \
+      "$(cardano-cli version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
+  fi
+  echo
+  echo -e "${YELLOW}起動ログ確認:${NC}"
+  echo "  sudo journalctl -u cardano-node -f"
+  echo
+  Gum_OneSelect "戻る"
+}

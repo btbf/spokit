@@ -18,6 +18,7 @@ source ${SPOKIT_INST_DIR}/components/node_sync_check
 source ${SPOKIT_INST_DIR}/components/mithril_bootstrap
 source ${SPOKIT_INST_DIR}/components/governance
 source ${SPOKIT_INST_DIR}/components/blocklog_setup
+source ${SPOKIT_INST_DIR}/components/node_update
 source ${env_path}
 
 clear
@@ -121,7 +122,7 @@ CnmMain(){
       do
       clear
       Header $headerTitle
-      selection=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ウォレット管理" "[2] プール情報管理" "[3] ガバナンス管理" "[4] ブロックログ管理" "[q] 終了")
+      selection=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ウォレット管理" "[2] プール情報管理" "[3] ガバナンス管理" "[4] ブロックログ管理" "[5] ノードアップデート" "[q] 終了")
       case $selection in
         "[1] ウォレット管理" )
         manageWallet
@@ -139,6 +140,10 @@ CnmMain(){
         BlocklogMenu
         ;;
 
+        "[5] ノードアップデート" )
+        NodeUpdate
+        ;;
+
         "[q] 終了" )
           tmux kill-session -t spokit
         ;;
@@ -151,10 +156,14 @@ CnmMain(){
       do
       clear
       Header $headerTitle
-      selection=$(gum filter --height=6 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] トポロジー変更" "[q] 終了")
+      selection=$(gum filter --height=6 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] トポロジー変更" "[2] ノードアップデート" "[q] 終了")
       case $selection in
         "[1] トポロジー変更" )
             topologyManagement
+        ;;
+
+        "[2] ノードアップデート" )
+            NodeUpdate
         ;;
 
         "[q] 終了" )
