@@ -1,0 +1,788 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2086,SC1001,SC2317
+
+#==============================================================================
+# blocklog_setup - ブロックログ・ブロック通知セットアップコンポーネント
+#   - CNCLI / sqlite3 / systemdサービス x4 のインストール
+#   - block-notify の Python環境構築・設定
+#==============================================================================
+
+# sed の置換文字列に使われる特殊文字をエスケープ
+_blk_sed_escape(){
+  printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
+}
+
+#==============================================================================
+# ブロックログセットアップ
+#==============================================================================
+
+BlocklogInstall(){
+  clear
+  Header "ブロックログセットアップ"
+
+  # 前提ファイル確認
+  local prereq_ok=true
+  for fname in "${POOL_ID_FILENAME}" "${POOL_ID_BECH32_FILENAME}" \
+               "${VRF_SKEY_FILENAME}" "${VRF_VKEY_FILENAME}"; do
+    if [ ! -f "${NODE_HOME}/${fname}" ]; then
+      echo -e "${RED}${fname} が見つかりません${NC}"
+      prereq_ok=false
+    fi
+  done
+  if [[ "$prereq_ok" == "false" ]]; then
+    echo -e "${RED}必要なキーファイルが揃っていません。プール運用キー作成を先に実施してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  # インストール済みチェック
+  if command -v cncli >/dev/null 2>&1 && \
+     [ -f "/etc/systemd/system/cnode-cncli-sync.service" ]; then
+    echo -e "${YELLOW}ブロックログはすでにインストールされています${NC}"
+    echo -e "CNCLI: ${GREEN}$(cncli --version 2>/dev/null | head -1)${NC}"
+    echo
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  echo -e "${YELLOW}インストール内容:${NC}"
+  echo "  ・Rust / rustup (未インストール時)"
+  echo "  ・CNCLI (最新版)"
+  echo "  ・sqlite3"
+  echo "  ・cncli.sh / cntools.library / blocks.sh / logMonitor.sh"
+  echo "  ・systemdサービス 4つ"
+  echo
+
+  if ! Gum_Confirm "インストールを開始しますか？"; then
+    return
+  fi
+
+  # BPノードポート検出
+  local b_PORT=""
+  b_PORT=$(grep -oP '(?<=--port )\d+' /etc/systemd/system/cardano-node.service 2>/dev/null || echo "")
+  if [[ -z "$b_PORT" ]]; then
+    b_PORT=$(ss -tlnp 2>/dev/null | grep cardano-node | grep -oP ':\K\d+' | head -1 || echo "")
+  fi
+  if [[ -n "$b_PORT" ]]; then
+    echo -e "BPポート: ${GREEN}${b_PORT}${NC} (自動検出)"
+  else
+    b_PORT=$(gum input --value="6000" --width=0 --no-show-help \
+      --header="BPノードのポート番号を入力してください" \
+      --header.foreground="99" \
+      --placeholder="6000")
+    [[ -z "$b_PORT" ]] && b_PORT="6000"
+  fi
+  echo
+
+  #------------------------------------------------------------
+  # 1. Rust インストール
+  #------------------------------------------------------------
+  if ! command -v rustup >/dev/null 2>&1; then
+    LglayStyle "Rust をインストール中..."
+    mkdir -p "$HOME/.cargo" "$HOME/.cargo/bin"
+    chown -R "$USER" "$HOME/.cargo"
+    touch "$HOME/.profile"
+    chown "$USER" "$HOME/.profile"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}Rust のインストールに失敗しました${NC}"
+      Gum_OneSelect "戻る"
+      return
+    fi
+    source "$HOME/.cargo/env"
+    rustup install stable
+    rustup default stable
+    rustup update
+    rustup component add clippy rustfmt
+    # .bashrc に cargo/env を追記
+    if ! grep -q "cargo/env" "$HOME/.bashrc"; then
+      echo 'source "$HOME/.cargo/env"' >> "$HOME/.bashrc"
+    fi
+    DglayStyle "Rust をインストールしました"
+  else
+    echo -e "Rust: ${GREEN}インストール済み${NC}"
+    source "$HOME/.cargo/env" 2>/dev/null || true
+  fi
+
+  #------------------------------------------------------------
+  # 2. CNCLI インストール
+  #------------------------------------------------------------
+  if ! command -v cncli >/dev/null 2>&1; then
+    LglayStyle "CNCLI のバージョンを確認中..."
+    local cncli_release
+    cncli_release=$(curl -s --max-time 10 \
+      https://api.github.com/repos/cardano-community/cncli/releases/latest \
+      | jq -r '.tag_name' | sed -e "s/^.\{1\}//")
+    if [[ -z "$cncli_release" || "$cncli_release" == "null" ]]; then
+      echo -e "${RED}CNCLI のバージョン取得に失敗しました。インターネット接続を確認してください。${NC}"
+      Gum_OneSelect "戻る"
+      return
+    fi
+
+    local cncli_tar="$HOME/cncli-${cncli_release}-x86_64-unknown-linux-gnu.tar.gz"
+    local cncli_url="https://github.com/cardano-community/cncli/releases/download/v${cncli_release}/cncli-${cncli_release}-ubuntu22-x86_64-unknown-linux-gnu.tar.gz"
+
+    gum spin --spinner dot --title "CNCLI v${cncli_release} をダウンロード中..." -- \
+      curl -sLJ "$cncli_url" -o "$cncli_tar"
+    if [ $? -ne 0 ] || ! gzip -t "$cncli_tar" 2>/dev/null; then
+      echo -e "${RED}CNCLI のダウンロードに失敗しました${NC}"
+      rm -f "$cncli_tar"
+      Gum_OneSelect "戻る"
+      return
+    fi
+    tar xzf "$cncli_tar" -C "$HOME/.cargo/bin/" 2>/dev/null
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}CNCLI の展開に失敗しました${NC}"
+      rm -f "$cncli_tar"
+      Gum_OneSelect "戻る"
+      return
+    fi
+    rm -f "$cncli_tar"
+    export PATH="$HOME/.cargo/bin:$PATH"
+    DglayStyle "CNCLI v${cncli_release} をインストールしました"
+  else
+    echo -e "CNCLI: ${GREEN}$(cncli --version 2>/dev/null | head -1)${NC}"
+  fi
+
+  #------------------------------------------------------------
+  # 3. sqlite3 インストール
+  #------------------------------------------------------------
+  if ! command -v sqlite3 >/dev/null 2>&1; then
+    gum spin --spinner dot --title "sqlite3 をインストール中..." -- \
+      sudo apt install -y sqlite3
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+      echo -e "${RED}sqlite3 のインストールに失敗しました${NC}"
+      Gum_OneSelect "戻る"
+      return
+    fi
+  fi
+  echo -e "sqlite3: ${GREEN}$(sqlite3 --version | awk '{print $1}')${NC}"
+
+  #------------------------------------------------------------
+  # 4. スクリプトダウンロード
+  #------------------------------------------------------------
+  LglayStyle "ブロックログスクリプトをダウンロード中..."
+  mkdir -p "$NODE_HOME/scripts"
+  cd "$NODE_HOME/scripts" || {
+    echo -e "${RED}スクリプトディレクトリへの移動に失敗しました${NC}"
+    Gum_OneSelect "戻る"
+    return
+  }
+
+  local guild_base="https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts"
+  local sjg_base="https://raw.githubusercontent.com/btbf/spojapanguild/master/scripts"
+  local dl_ok=true
+
+  for entry in \
+    "${guild_base}/env:env" \
+    "${guild_base}/cncli.sh:cncli.sh" \
+    "${guild_base}/cntools.library:cntools.library" \
+    "${sjg_base}/blocks.sh:blocks.sh" \
+    "${sjg_base}/logMonitor.sh:logMonitor.sh"; do
+    local url="${entry%%:*}"
+    local dest="${entry##*:}"
+    if ! wget -q "$url" -O "$dest" 2>/dev/null; then
+      echo -e "${RED}${dest} のダウンロードに失敗しました${NC}"
+      dl_ok=false
+    fi
+  done
+
+  if [[ "$dl_ok" == "false" ]]; then
+    Gum_OneSelect "戻る"
+    return
+  fi
+  chmod 755 cncli.sh logMonitor.sh blocks.sh
+  DglayStyle "スクリプトをダウンロードしました"
+
+  #------------------------------------------------------------
+  # 5. guild-operators env ファイル設定
+  #------------------------------------------------------------
+  LglayStyle "env ファイルを設定中..."
+  sed -i "$NODE_HOME/scripts/env" \
+    -e '1,73s!#CNODEBIN="${HOME}/.local/bin/cardano-node"!CNODEBIN="/usr/local/bin/cardano-node"!' \
+    -e '1,73s!#CCLI="${HOME}/.local/bin/cardano-cli"!CCLI="/usr/local/bin/cardano-cli"!' \
+    -e '1,73s!#CNCLI="${HOME}/.local/bin/cncli"!CNCLI="${HOME}/.cargo/bin/cncli"!' \
+    -e "1,73s!#CNODE_HOME=\"/opt/cardano/cnode\"!CNODE_HOME=\"${NODE_HOME}\"!" \
+    -e "1,73s!#CNODE_PORT=6000!CNODE_PORT=${b_PORT}!" \
+    -e '1,73s!#BLOCKLOG_TZ="UTC"!BLOCKLOG_TZ="Asia/Tokyo"!'
+
+  #------------------------------------------------------------
+  # 6. cncli.sh 設定 (プールID / VRFキー)
+  #------------------------------------------------------------
+  LglayStyle "cncli.sh を設定中..."
+  local pool_hex pool_bech32
+  pool_hex=$(cat "${NODE_HOME}/${POOL_ID_FILENAME}" 2>/dev/null || echo "")
+  pool_bech32=$(cat "${NODE_HOME}/${POOL_ID_BECH32_FILENAME}" 2>/dev/null || echo "")
+
+  if [[ -z "$pool_hex" || -z "$pool_bech32" ]]; then
+    echo -e "${RED}プールIDファイルが見つかりません。プール登録後に実施してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+  echo -e "プールID (hex):    ${GREEN}${pool_hex}${NC}"
+  echo -e "プールID (bech32): ${GREEN}${pool_bech32}${NC}"
+
+  sed -i "$NODE_HOME/scripts/cncli.sh" \
+    -e "1,30s!#POOL_ID=\"\"!POOL_ID=\"${pool_hex}\"!" \
+    -e "1,30s!#POOL_ID_BECH32=\"\"!POOL_ID_BECH32=\"${pool_bech32}\"!" \
+    -e '1,30s!#POOL_VRF_SKEY=""!POOL_VRF_SKEY="${CNODE_HOME}/vrf.skey"!' \
+    -e '1,30s!#POOL_VRF_VKEY=""!POOL_VRF_VKEY="${CNODE_HOME}/vrf.vkey"!'
+
+  #------------------------------------------------------------
+  # 7. systemd サービスファイル作成
+  #------------------------------------------------------------
+  LglayStyle "systemd サービスファイルを作成中..."
+  mkdir -p "$NODE_HOME/service"
+  local CUR_USER
+  CUR_USER=$(whoami)
+
+  cat > "$NODE_HOME/service/cnode-cncli-sync.service" << EOF
+[Unit]
+Description=Cardano Node - CNCLI sync
+BindsTo=cardano-node.service
+After=cardano-node.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=20
+User=${CUR_USER}
+WorkingDirectory=${NODE_HOME}/scripts
+ExecStart=/bin/bash -l -c "exec ${NODE_HOME}/scripts/cncli.sh sync"
+ExecStop=/bin/bash -l -c "exec kill -2 \$(ps -ef | grep [c]ncli.sync.*${NODE_HOME}/ | tr -s ' ' | cut -d ' ' -f2) &>/dev/null"
+KillSignal=SIGINT
+SuccessExitStatus=143
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cnode-cncli-sync
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=cardano-node.service
+EOF
+
+  cat > "$NODE_HOME/service/cnode-cncli-validate.service" << EOF
+[Unit]
+Description=Cardano Node - CNCLI validate
+BindsTo=cnode-cncli-sync.service
+After=cnode-cncli-sync.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=20
+User=${CUR_USER}
+WorkingDirectory=${NODE_HOME}/scripts
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/bash -l -c "exec ${NODE_HOME}/scripts/cncli.sh validate"
+SuccessExitStatus=143
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cnode-cncli-validate
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=cnode-cncli-sync.service
+EOF
+
+  cat > "$NODE_HOME/service/cnode-cncli-leaderlog.service" << EOF
+[Unit]
+Description=Cardano Node - CNCLI Leaderlog
+BindsTo=cnode-cncli-sync.service
+After=cnode-cncli-sync.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=20
+User=${CUR_USER}
+WorkingDirectory=${NODE_HOME}
+ExecStart=/bin/bash -l -c "exec ${NODE_HOME}/scripts/cncli.sh leaderlog"
+SuccessExitStatus=143
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cnode-cncli-leaderlog
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=cnode-cncli-sync.service
+EOF
+
+  cat > "$NODE_HOME/service/cnode-logmonitor.service" << EOF
+[Unit]
+Description=Cardano Node - CNCLI logmonitor
+BindsTo=cardano-node.service
+After=cardano-node.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=1
+User=${CUR_USER}
+WorkingDirectory=${NODE_HOME}
+ExecStart=/bin/bash -l -c "exec ${NODE_HOME}/scripts/logMonitor.sh"
+ExecStop=/bin/bash -l -c "exec kill -2 \$(ps -ef | grep -m1 ${NODE_HOME}/scripts/logMonitor.sh | tr -s ' ' | cut -d ' ' -f2) &>/dev/null"
+KillSignal=SIGINT
+SuccessExitStatus=143
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cnode-logmonitor
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=cardano-node.service
+EOF
+
+  #------------------------------------------------------------
+  # 8. サービスデプロイ
+  #------------------------------------------------------------
+  LglayStyle "systemd サービスをデプロイ中..."
+  sudo cp \
+    "$NODE_HOME/service/cnode-cncli-sync.service" \
+    "$NODE_HOME/service/cnode-cncli-validate.service" \
+    "$NODE_HOME/service/cnode-cncli-leaderlog.service" \
+    "$NODE_HOME/service/cnode-logmonitor.service" \
+    /etc/systemd/system/
+  sudo chmod 644 \
+    /etc/systemd/system/cnode-cncli-sync.service \
+    /etc/systemd/system/cnode-cncli-validate.service \
+    /etc/systemd/system/cnode-cncli-leaderlog.service \
+    /etc/systemd/system/cnode-logmonitor.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now \
+    cnode-cncli-sync.service \
+    cnode-cncli-validate.service \
+    cnode-cncli-leaderlog.service \
+    cnode-logmonitor.service
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}サービスのデプロイに失敗しました${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  #------------------------------------------------------------
+  # 9. エイリアス追加
+  #------------------------------------------------------------
+  if ! grep -q "cnclilog" "$HOME/.bashrc"; then
+    echo alias cnclilog='"journalctl --no-hostname -u cnode-cncli-sync -f"' >> "$HOME/.bashrc"
+    echo alias validate='"journalctl --no-hostname -u cnode-cncli-validate -f"' >> "$HOME/.bashrc"
+    echo alias leaderlog='"journalctl --no-hostname -u cnode-cncli-leaderlog -f"' >> "$HOME/.bashrc"
+    echo alias logmonitor='"journalctl --no-hostname -u cnode-logmonitor -f"' >> "$HOME/.bashrc"
+    echo alias blocks="'cd ${NODE_HOME}/scripts; ./blocks.sh'" >> "$HOME/.bashrc"
+  fi
+
+  echo
+  YellowStyle "ブロックログのセットアップが完了しました"
+  echo
+  echo -e "${YELLOW}次のステップ:${NC}"
+  echo "  1. source ~/.bashrc でエイリアスを有効化"
+  echo "  2. cnclilog でDBの同期状況を確認 (100%になるまで待機)"
+  echo "  3. 同期完了後、blocks コマンドでブロックログを確認"
+  echo
+  Gum_OneSelect "戻る"
+}
+
+
+#==============================================================================
+# ブロック通知設定
+#==============================================================================
+
+BlockNotifyInstall(){
+  clear
+  Header "ブロック通知設定"
+
+  # 前提: ブロックログが設定済みか
+  if [ ! -f "/etc/systemd/system/cnode-cncli-sync.service" ]; then
+    echo -e "${RED}ブロックログが未セットアップです。先にブロックログセットアップを実施してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  local bn_dir="$NODE_HOME/scripts/block-notify"
+  local is_update=false
+
+  # 更新か新規インストールか判定
+  if [ -f "/etc/systemd/system/cnode-blocknotify.service" ]; then
+    echo -e "${YELLOW}ブロック通知はすでにインストールされています${NC}"
+    echo
+    local update_choice
+    update_choice=$(gum choose --height=4 --no-show-help \
+      --header="操作を選択してください" \
+      --header.foreground="244" \
+      "スクリプトを更新する" "通知設定を変更する" "キャンセル") || return
+    [[ "$update_choice" == "キャンセル" ]] && return
+    if [[ "$update_choice" == "スクリプトを更新する" ]]; then
+      is_update=true
+    fi
+  fi
+
+  #------------------------------------------------------------
+  # 1. Python 環境セットアップ
+  #------------------------------------------------------------
+  if [[ "$is_update" == "false" ]]; then
+    LglayStyle "Python パッケージをインストール中..."
+    sudo apt install -y python3-pip python3-venv python3-full > /dev/null 2>&1
+
+    if [ ! -d "$HOME/notify-venv" ]; then
+      python3 -m venv "$HOME/notify-venv"
+      if [ $? -ne 0 ]; then
+        echo -e "${RED}Python 仮想環境の作成に失敗しました${NC}"
+        Gum_OneSelect "戻る"
+        return
+      fi
+    fi
+
+    gum spin --spinner dot --title "Python パッケージをインストール中..." -- \
+      "$HOME/notify-venv/bin/pip" install -q -U pip \
+        watchdog pytz python-dateutil requests \
+        discordwebhook slackweb "i18nice[YAML]" python-dotenv
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}Python パッケージのインストールに失敗しました${NC}"
+      Gum_OneSelect "戻る"
+      return
+    fi
+    DglayStyle "Python 環境を構築しました"
+  fi
+
+  #------------------------------------------------------------
+  # 2. block-notify ダウンロード
+  #------------------------------------------------------------
+  LglayStyle "block-notify の最新バージョンを確認中..."
+  local bn_release
+  bn_release=$(curl -s --max-time 10 \
+    https://api.github.com/repos/btbf/block-notify/releases/latest | jq -r '.tag_name')
+  if [[ -z "$bn_release" || "$bn_release" == "null" ]]; then
+    echo -e "${RED}block-notify のバージョン取得に失敗しました${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+  echo -e "block-notify: ${GREEN}v${bn_release}${NC}"
+
+  mkdir -p "$NODE_HOME/scripts"
+  cd "$NODE_HOME/scripts" || {
+    echo -e "${RED}スクリプトディレクトリへの移動に失敗しました${NC}"
+    Gum_OneSelect "戻る"
+    return
+  }
+
+  gum spin --spinner dot --title "block-notify v${bn_release} をダウンロード中..." -- \
+    wget -q "https://github.com/btbf/block-notify/archive/refs/tags/${bn_release}.tar.gz" \
+      -O "${bn_release}.tar.gz"
+  if [ $? -ne 0 ] || ! gzip -t "${bn_release}.tar.gz" 2>/dev/null; then
+    echo -e "${RED}block-notify のダウンロードに失敗しました${NC}"
+    rm -f "${bn_release}.tar.gz"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  local bn_src="block-notify-${bn_release}"
+  if [[ "$is_update" == "true" && -d "$bn_dir" ]]; then
+    # 更新: block_notify.py と i18n のみ上書き
+    tar zxf "${bn_release}.tar.gz" \
+      "${bn_src}/block_notify.py" \
+      "${bn_src}/i18n/" 2>/dev/null
+    cp "${bn_src}/block_notify.py" "$bn_dir/block_notify.py"
+    cp -r "${bn_src}/i18n" "$bn_dir/"
+    rm -rf "${bn_src}" "${bn_release}.tar.gz"
+    DglayStyle "block-notify v${bn_release} に更新しました"
+    # 更新時はサービス再起動して終了
+    sudo systemctl restart cnode-blocknotify.service
+    echo
+    YellowStyle "ブロック通知を更新しました"
+    echo
+    Gum_OneSelect "戻る"
+    return
+  else
+    # 新規: 全ファイル展開
+    tar zxf "${bn_release}.tar.gz" \
+      "${bn_src}/block_notify.py" \
+      "${bn_src}/config.ini" \
+      "${bn_src}/i18n/" 2>/dev/null
+    [ -d "$bn_dir" ] && rm -rf "$bn_dir"
+    mv "$bn_src" "$bn_dir"
+    rm -f "${bn_release}.tar.gz"
+  fi
+  DglayStyle "block-notify をダウンロードしました"
+
+  #------------------------------------------------------------
+  # 3. config.ini 初期化 (sed による基本設定)
+  #------------------------------------------------------------
+  local config_file="$bn_dir/config.ini"
+  sed -i "$config_file" \
+    -e "s|/opt/cardano/cnode|${NODE_HOME}|g" \
+    -e "s|files/|${NODE_CONFIG}-|g" \
+    -e 's|notify_language = en|notify_language = ja|' \
+    -e 's|Etc/UTC|Asia/Tokyo|'
+
+  #------------------------------------------------------------
+  # 4. 通知設定 (gum による対話入力)
+  #------------------------------------------------------------
+  clear
+  Header "ブロック通知設定"
+  echo -e "${YELLOW}通知の詳細設定を行います${NC}"
+  echo
+
+  # プールティッカー
+  local pool_ticker
+  pool_ticker=$(gum input --width=0 --no-show-help \
+    --header="プールティッカー名を入力してください" \
+    --header.foreground="99" \
+    --placeholder="例: SJG")
+  [[ -z "$pool_ticker" ]] && pool_ticker="POOL"
+
+  # 通知プラットフォーム
+  local notify_platform
+  notify_platform=$(gum choose --height=6 --no-show-help \
+    --header="通知プラットフォームを選択してください" \
+    --header.foreground="244" \
+    "Line" "Discord" "Telegram" "Slack") || return
+
+  # 通知レベル
+  local notify_level_label notify_level_val
+  notify_level_label=$(gum choose --height=5 --no-show-help \
+    --header="通知レベルを選択してください" \
+    --header.foreground="244" \
+    "All           (すべての状態変化を通知)" \
+    "ExceptConfirm (確認済み以外を通知)" \
+    "OnlyMissed    (ミスのみ通知)") || return
+  case "$notify_level_label" in
+    All*)          notify_level_val="All" ;;
+    ExceptConfirm*) notify_level_val="ExceptConfirm" ;;
+    OnlyMissed*)   notify_level_val="OnlyMissed" ;;
+  esac
+
+  # 次エポックスケジュール通知形式
+  local leader_date_label leader_date_val
+  leader_date_label=$(gum choose --height=4 --no-show-help \
+    --header="次エポックのスケジュール通知形式を選択してください" \
+    --header.foreground="244" \
+    "SummaryDate (日時付きサマリー)" \
+    "SummaryOnly (件数のみ)") || return
+  case "$leader_date_label" in
+    SummaryDate*) leader_date_val="SummaryDate" ;;
+    SummaryOnly*) leader_date_val="SummaryOnly" ;;
+  esac
+
+  #------------------------------------------------------------
+  # 5. プラットフォーム別トークン・URL 設定
+  #------------------------------------------------------------
+  echo
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo -e "${YELLOW}${notify_platform} の認証情報を設定します${NC}"
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo
+
+  case "$notify_platform" in
+
+    "Line" )
+      echo -e "${YELLOW}LINE Messaging API の設定手順:${NC}"
+      echo -e "  ${CYAN}https://docs.spojapanguild.net/cardano/setup/blocknotify-setup/#line-messaging-api${NC}"
+      echo
+      echo "上記URLを参考にチャンネルアクセストークンとユーザーIDを取得してください"
+      echo
+      Gum_OneSelect "準備ができたらEnterを押してください"
+      echo
+      local line_token line_user
+      line_token=$(gum input --width=0 --no-show-help \
+        --header="チャンネルアクセストークンを入力してください" \
+        --header.foreground="99" \
+        --placeholder="チャンネルアクセストークン...")
+      line_user=$(gum input --width=0 --no-show-help \
+        --header="あなたのユーザーIDを入力してください" \
+        --header.foreground="99" \
+        --placeholder="Uxxxxxxxxxx...")
+      local esc_token esc_user
+      esc_token=$(_blk_sed_escape "$line_token")
+      esc_user=$(_blk_sed_escape "$line_user")
+      sed -i "$config_file" \
+        -e "s|^line_notify_token.*|line_notify_token = ${esc_token}|" \
+        -e "s|^line_user_id.*|line_user_id = ${esc_user}|"
+      ;;
+
+    "Discord" )
+      echo -e "${YELLOW}Discord Webhook URL の取得手順:${NC}"
+      echo -e "  ${CYAN}https://docs.spojapanguild.net/cardano/setup/blocknotify-setup/#discord${NC}"
+      echo
+      echo "サーバー設定 → 連携サービス → ウェブフックを作成 → URLをコピー"
+      echo
+      Gum_OneSelect "準備ができたらEnterを押してください"
+      echo
+      local discord_url
+      discord_url=$(gum input --width=0 --no-show-help \
+        --header="Webhook URL を入力してください" \
+        --header.foreground="99" \
+        --placeholder="https://discord.com/api/webhooks/...")
+      local esc_url
+      esc_url=$(_blk_sed_escape "$discord_url")
+      sed -i "$config_file" \
+        -e "s|^discord_webhook_url.*|discord_webhook_url = ${esc_url}|"
+      ;;
+
+    "Telegram" )
+      echo -e "${YELLOW}Telegram Bot の設定手順:${NC}"
+      echo -e "  ${CYAN}https://docs.spojapanguild.net/cardano/setup/blocknotify-setup/#telegram${NC}"
+      echo
+      echo "  1. @botFather で /newbot → APIトークン取得"
+      echo "  2. @RawDataBot で Chat ID を取得"
+      echo
+      Gum_OneSelect "準備ができたらEnterを押してください"
+      echo
+      local tg_token tg_id
+      tg_token=$(gum input --width=0 --no-show-help \
+        --header="Telegram Bot API トークンを入力してください" \
+        --header.foreground="99" \
+        --placeholder="1234567890:ABCDEF...")
+      tg_id=$(gum input --width=0 --no-show-help \
+        --header="Telegram Chat ID を入力してください" \
+        --header.foreground="99" \
+        --placeholder="123456789")
+      local esc_token esc_id
+      esc_token=$(_blk_sed_escape "$tg_token")
+      esc_id=$(_blk_sed_escape "$tg_id")
+      sed -i "$config_file" \
+        -e "s|^telegram_token.*|telegram_token = ${esc_token}|" \
+        -e "s|^telegram_id.*|telegram_id = ${esc_id}|"
+      ;;
+
+    "Slack" )
+      echo -e "${YELLOW}Slack Incoming Webhook URL の取得手順:${NC}"
+      echo -e "  ${CYAN}https://docs.spojapanguild.net/cardano/setup/blocknotify-setup/#slack${NC}"
+      echo
+      echo "  https://my.slack.com/services/new/incoming-webhook/ でWebhook URLを取得"
+      echo
+      Gum_OneSelect "準備ができたらEnterを押してください"
+      echo
+      local slack_url
+      slack_url=$(gum input --width=0 --no-show-help \
+        --header="Webhook URL を入力してください" \
+        --header.foreground="99" \
+        --placeholder="https://hooks.slack.com/services/...")
+      local esc_url
+      esc_url=$(_blk_sed_escape "$slack_url")
+      sed -i "$config_file" \
+        -e "s|^slack_webhook_url.*|slack_webhook_url = ${esc_url}|"
+      ;;
+  esac
+
+  # 共通項目の設定
+  local esc_ticker
+  esc_ticker=$(_blk_sed_escape "$pool_ticker")
+  sed -i "$config_file" \
+    -e "s|^pool_ticker.*|pool_ticker = ${esc_ticker}|" \
+    -e "s|^notify_platform.*|notify_platform = ${notify_platform}|" \
+    -e "s|^notify_level.*|notify_level = ${notify_level_val}|" \
+    -e "s|^nextepoch_leader_date.*|nextepoch_leader_date = ${leader_date_val}|"
+
+  #------------------------------------------------------------
+  # 6. systemd サービスファイル作成・デプロイ
+  #------------------------------------------------------------
+  local CUR_USER
+  CUR_USER=$(whoami)
+  mkdir -p "$NODE_HOME/service"
+
+  cat > "$NODE_HOME/service/cnode-blocknotify.service" << EOF
+[Unit]
+Description=Cardano Node - SPO Blocknotify
+BindsTo=cnode-cncli-sync.service
+After=cnode-cncli-sync.service
+
+[Service]
+Type=simple
+User=${CUR_USER}
+WorkingDirectory=${NODE_HOME}/scripts/block-notify
+ExecStart=/home/${USER}/notify-venv/bin/python -u ${NODE_HOME}/scripts/block-notify/block_notify.py
+Restart=on-failure
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cnode-blocknotify
+
+[Install]
+WantedBy=cnode-cncli-sync.service
+EOF
+
+  sudo cp "$NODE_HOME/service/cnode-blocknotify.service" /etc/systemd/system/
+  sudo chmod 644 /etc/systemd/system/cnode-blocknotify.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now cnode-blocknotify.service
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}サービスのデプロイに失敗しました${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  #------------------------------------------------------------
+  # 7. エイリアス追加
+  #------------------------------------------------------------
+  if ! grep -q "blocknotify" "$HOME/.bashrc"; then
+    echo alias blocknotify='"journalctl --no-hostname -u cnode-blocknotify -f"' >> "$HOME/.bashrc"
+  fi
+
+  echo
+  YellowStyle "ブロック通知の設定が完了しました"
+  echo
+  echo -e "${YELLOW}設定内容:${NC}"
+  printf "  %-18s %s\n" "ティッカー:"     "$pool_ticker"
+  printf "  %-18s %s\n" "プラットフォーム:" "$notify_platform"
+  printf "  %-18s %s\n" "通知レベル:"     "$notify_level_val"
+  echo
+  echo -e "${YELLOW}起動ログ確認:${NC}"
+  echo "  journalctl --no-hostname -u cnode-blocknotify -f"
+  echo
+  Gum_OneSelect "戻る"
+}
+
+
+#==============================================================================
+# ブロックログメインメニュー
+#==============================================================================
+
+BlocklogMenu(){
+  while :
+  do
+    clear
+    Header "ブロックログ管理"
+
+    # インストール状況サマリー
+    local cncli_status blocknotify_status
+    if command -v cncli >/dev/null 2>&1 && \
+       [ -f "/etc/systemd/system/cnode-cncli-sync.service" ]; then
+      cncli_status="${GREEN}インストール済み ($(cncli --version 2>/dev/null | head -1))${NC}"
+    else
+      cncli_status="${YELLOW}未インストール${NC}"
+    fi
+    if [ -f "/etc/systemd/system/cnode-blocknotify.service" ]; then
+      blocknotify_status="${GREEN}設定済み${NC}"
+    else
+      blocknotify_status="${YELLOW}未設定${NC}"
+    fi
+    echo -e "ブロックログ: $(eval echo -e "$cncli_status")"
+    echo -e "ブロック通知: $(eval echo -e "$blocknotify_status")"
+    echo
+
+    local selection
+    selection=$(gum filter --height=6 --no-show-help \
+      --header.foreground="075" \
+      --indicator=">" \
+      --placeholder="番号選択も可..." \
+      --prompt="◉ " \
+      "[1] ブロックログセットアップ" \
+      "[2] ブロック通知設定" \
+      "[q] 戻る") || break
+
+    case "$selection" in
+      "[1] ブロックログセットアップ" )
+        BlocklogInstall
+        ;;
+      "[2] ブロック通知設定" )
+        BlockNotifyInstall
+        ;;
+      "[q] 戻る" )
+        break
+        ;;
+    esac
+  done
+}
