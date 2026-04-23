@@ -3,7 +3,7 @@
 
 #==============================================================================
 # governance - ガバナンス管理コンポーネント
-#   - SPO投票 (ガバナンスアクションへの賛成/反対/棄権)
+#   - SPO投票 (ガバナンスアクションへの賛成/反対/棄権・投票理由Anchor対応)
 #   - DRep委任 (DRep指定/自動棄権/自動不信任)
 #==============================================================================
 
@@ -124,7 +124,7 @@ _gov_payment_utxo(){
   done < "${NODE_HOME}/balance.out"
 }
 
-# ガバナンス用Tx送信フロー (signed_file を引数に取る)
+# ガバナンス用Tx送信フロー
 _gov_tx_submit(){
   local signed_file=$1
   local raw_file=${2:-""}
@@ -204,6 +204,211 @@ _gov_airgap_guide(){
   echo -e "${YELLOW}3. エアギャップで以下のコマンドを実行してください${NC}"
   echo "   source \${NODE_HOME}/${script_name}"
   echo
+}
+
+# 投票理由Anchor取得
+# CIP-100 JSON を作成し Blockfrost IPFS または任意URLで設定する
+# 結果: vote_anchor_url / vote_anchor_hash をセット (空文字 = なし)
+_gov_get_vote_anchor(){
+  local governance_dir="${NODE_HOME}/governance"
+  local gov_tx_id=$1
+
+  # declare -g で呼び出し元スコープに値をセット
+  declare -g vote_anchor_url=""
+  declare -g vote_anchor_hash=""
+
+  if ! Gum_Confirm "投票理由 (Anchor) を追加しますか？"; then
+    return
+  fi
+
+  local method
+  method=$(gum choose --height=5 --no-show-help \
+    --header="投票理由の追加方法を選択してください" \
+    --header.foreground="244" \
+    "Blockfrost IPFSで作成・アップロード" \
+    "任意のURLを指定" \
+    "キャンセル") || return
+  [[ "$method" == "キャンセル" ]] && return
+
+  case "$method" in
+
+    #------------------------------------------------------------
+    # Blockfrost IPFS アップロード
+    #------------------------------------------------------------
+    "Blockfrost IPFSで作成・アップロード" )
+      echo
+      echo -e "${YELLOW}Blockfrost IPFSを使用して投票理由を作成します${NC}"
+      echo -e "Blockfrost PROJECT_IDが必要です。未取得の場合は ${CYAN}https://blockfrost.io/${NC} で作成してください"
+      echo
+
+      # 投票理由テキスト入力
+      echo -e "${YELLOW}※ 複数行入力できます。Ctrl+D で確定してください${NC}"
+      local comment_input
+      comment_input=$(gum write --width=80 --height=8 --no-show-help \
+        --header="投票理由を入力してください" \
+        --header.foreground="99" \
+        --placeholder="投票理由を入力...") || return
+      if [[ -z "$comment_input" ]]; then
+        echo -e "${YELLOW}投票理由が未入力のためアンカーの追加をスキップします${NC}"
+        return
+      fi
+
+      # Blockfrost PROJECT_ID 入力
+      local project_id
+      project_id=$(gum input --width=0 --no-show-help \
+        --header="Blockfrost PROJECT_ID を入力してください" \
+        --header.foreground="99" \
+        --placeholder="mainnetXXXXXXXXXXXXXXXX") || return
+      if [[ -z "$project_id" ]]; then
+        echo -e "${YELLOW}PROJECT_IDが未入力のためアンカーの追加をスキップします${NC}"
+        return
+      fi
+
+      # CIP-100 形式のJSONを作成
+      local reason_file="${governance_dir}/vote_reason_${gov_tx_id}.json"
+      local comment_json
+      comment_json=$(printf "%s" "$comment_input" | jq -Rs .)
+      cat > "$reason_file" << CIP100_EOF
+{
+  "@context": {
+    "CIP100": "https://github.com/cardano-foundation/CIPs/blob/master/CIP-0100/README.md#",
+    "hashAlgorithm": "CIP100:hashAlgorithm",
+    "body": {
+      "@id": "CIP100:body",
+      "@context": {
+        "references": {
+          "@id": "CIP100:references",
+          "@container": "@set",
+          "@context": {
+            "GovernanceMetadata": "CIP100:GovernanceMetadataReference",
+            "Other": "CIP100:OtherReference",
+            "label": "CIP100:reference-label",
+            "uri": "CIP100:reference-uri",
+            "referenceHash": {
+              "@id": "CIP100:referenceHash",
+              "@context": {
+                "hashDigest": "CIP100:hashDigest",
+                "hashAlgorithm": "CIP100:hashAlgorithm"
+              }
+            }
+          }
+        },
+        "comment": "CIP100:comment",
+        "externalUpdates": {
+          "@id": "CIP100:externalUpdates",
+          "@context": {
+            "title": "CIP100:update-title",
+            "uri": "CIP100:uri"
+          }
+        }
+      }
+    },
+    "authors": {
+      "@id": "CIP100:authors",
+      "@container": "@set",
+      "@context": {
+        "name": "http://xmlns.com/foaf/0.1/name",
+        "witness": {
+          "@id": "CIP100:witness",
+          "@context": {
+            "witnessAlgorithm": "CIP100:witnessAlgorithm",
+            "publicKey": "CIP100:publicKey",
+            "signature": "CIP100:signature"
+          }
+        }
+      }
+    }
+  },
+  "authors": [],
+  "body": {
+    "comment": ${comment_json}
+  },
+  "hashAlgorithm": "blake2b-256"
+}
+CIP100_EOF
+
+      # Blockfrost IPFSへアップロード
+      LglayStyle "Blockfrost IPFSへアップロード中..."
+      local upload_resp="${governance_dir}/ipfs_upload_${gov_tx_id}.json"
+      local http_code
+      http_code=$(curl -s \
+        -o "$upload_resp" \
+        -w "%{http_code}" \
+        "https://ipfs.blockfrost.io/api/v0/ipfs/add" \
+        -X POST \
+        -H "project_id: ${project_id}" \
+        -F "file=@${reason_file}")
+
+      if [[ "$http_code" == "200" ]]; then
+        local ipfs_hash
+        ipfs_hash=$(jq -r '.ipfs_hash // empty' "$upload_resp" 2>/dev/null)
+        if [[ -n "$ipfs_hash" ]]; then
+          vote_anchor_url="https://ipfs.blockfrost.dev/ipfs/${ipfs_hash}"
+          vote_anchor_hash=$(cardano-cli hash anchor-data --file-text "$reason_file" 2>/dev/null)
+          echo -e "${GREEN}IPFSアップロードに成功しました${NC}"
+          echo -e "IPFS Hash: ${GREEN}${ipfs_hash}${NC}"
+          echo -e "Anchor URL: ${vote_anchor_url}"
+          echo -e "Anchor Hash: ${vote_anchor_hash}"
+        else
+          echo -e "${RED}IPFSハッシュの取得に失敗しました (レスポンス: $(cat "$upload_resp"))${NC}"
+          echo -e "${YELLOW}アンカーの追加をスキップします${NC}"
+          rm -f "$upload_resp"
+          return
+        fi
+      else
+        echo -e "${RED}Blockfrost IPFSへのアップロードに失敗しました (HTTP ${http_code})${NC}"
+        if [[ -f "$upload_resp" ]]; then
+          echo "レスポンス: $(cat "$upload_resp")"
+          rm -f "$upload_resp"
+        fi
+        echo -e "${YELLOW}アンカーの追加をスキップします${NC}"
+        return
+      fi
+      rm -f "$upload_resp"
+      ;;
+
+    #------------------------------------------------------------
+    # 任意URL指定
+    #------------------------------------------------------------
+    "任意のURLを指定" )
+      echo
+      while :
+      do
+        local input_url
+        input_url=$(gum input --width=0 --no-show-help \
+          --header="アンカーURLを入力してください (https://...)" \
+          --header.foreground="99" \
+          --placeholder="https://...") || return
+        [[ -z "$input_url" ]] && { echo "URLが未入力です"; return; }
+
+        if [[ "$input_url" != https://* && "$input_url" != ipfs://* ]]; then
+          echo -e "${RED}URLは https:// または ipfs:// から始まる形式で入力してください${NC}"
+          continue
+        fi
+
+        LglayStyle "アンカーURLからデータを取得中..."
+        local tmp_anchor="${governance_dir}/manual_anchor_${gov_tx_id}.json"
+        if _gov_download_anchor "$input_url" "$tmp_anchor" 2>/dev/null; then
+          vote_anchor_url="$input_url"
+          vote_anchor_hash=$(cardano-cli hash anchor-data --file-text "$tmp_anchor" 2>/dev/null)
+          rm -f "$tmp_anchor"
+          if [[ -z "$vote_anchor_hash" ]]; then
+            echo -e "${RED}アンカーハッシュの計算に失敗しました${NC}"
+            echo "cardano-cli が正しくインストールされているか確認してください"
+            vote_anchor_url=""
+            return
+          fi
+          echo -e "${GREEN}アンカーデータを確認しました${NC}"
+          echo -e "Anchor URL:  ${vote_anchor_url}"
+          echo -e "Anchor Hash: ${vote_anchor_hash}"
+          break
+        else
+          echo -e "${RED}指定URLからデータを取得できませんでした。再入力してください${NC}"
+          rm -f "$tmp_anchor"
+        fi
+      done
+      ;;
+  esac
 }
 
 
@@ -323,15 +528,15 @@ GovernanceSpoVote(){
   echo -e "${WHITE}--------------------------------------------${NC}"
   echo -e "${YELLOW}選択したガバナンスアクション${NC}"
   echo -e "${WHITE}--------------------------------------------${NC}"
-  printf "%-18s %s\n" "TxID:"         "$governance_id_tx"
-  printf "%-18s %s\n" "Index:"        "$governance_action_index"
-  printf "%-18s %s\n" "タイプ:"       "$proposal_type"
+  printf "%-18s %s\n" "TxID:"    "$governance_id_tx"
+  printf "%-18s %s\n" "Index:"   "$governance_action_index"
+  printf "%-18s %s\n" "タイプ:"  "$proposal_type"
   printf "%-18s Ep%s → Ep%s\n" "期間:" "$proposed_in" "$expires_after"
 
   local anchor_file="${governance_dir}/anchor_${governance_id_tx}.json"
   if _gov_download_anchor "$anchor_url" "$anchor_file" 2>/dev/null; then
     local anchor_title anchor_abstract onchain_hash dl_hash
-    anchor_title=$(jq -r '.body.title // ""'    "$anchor_file" 2>/dev/null)
+    anchor_title=$(jq -r '.body.title // ""'       "$anchor_file" 2>/dev/null)
     anchor_abstract=$(jq -r '.body.abstract // ""' "$anchor_file" 2>/dev/null)
     onchain_hash=$(echo "$gov_state_json" | jq -r \
       --arg txid "$governance_id_tx" --argjson ix "$governance_action_index" \
@@ -339,8 +544,8 @@ GovernanceSpoVote(){
        | select(.value.actionId.txId==$txid and .value.actionId.govActionIx==$ix)
        | .value.proposalProcedure.anchor.dataHash' 2>/dev/null)
     dl_hash=$(b2sum -l 256 "$anchor_file" 2>/dev/null | awk '{print $1}')
-    [[ -n "$anchor_title"    ]] && printf "%-18s %s\n" "タイトル:"  "$anchor_title"
-    [[ -n "$anchor_abstract" ]] && printf "%-18s %.100s...\n" "概要:" "$anchor_abstract"
+    [[ -n "$anchor_title"    ]] && printf "%-18s %s\n"       "タイトル:" "$anchor_title"
+    [[ -n "$anchor_abstract" ]] && printf "%-18s %.100s...\n" "概要:"    "$anchor_abstract"
     if [[ -n "$dl_hash" && -n "$onchain_hash" && "$dl_hash" != "$onchain_hash" ]]; then
       echo -e "${RED}⚠ 警告: データハッシュが不一致です。内容を十分確認してから投票してください。${NC}"
     fi
@@ -366,10 +571,25 @@ GovernanceSpoVote(){
     "棄権 (Abstain)") vote_value_flag="abstain" ;;
   esac
 
+  # 投票理由 Anchor の取得 (任意)
   echo
-  echo -e "${YELLOW}投票内容確認:${NC}"
-  printf "%-10s %s\n" "ガバナンスID:" "$governance_id_tx"
-  printf "%-10s %s\n" "投票:"         "$vote_choice"
+  _gov_get_vote_anchor "$governance_id_tx"
+  # vote_anchor_url / vote_anchor_hash が _gov_get_vote_anchor でセットされる
+
+  # 投票内容確認表示
+  echo
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo -e "${YELLOW}投票内容確認${NC}"
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  printf "%-14s %s\n" "ガバナンスID:" "$governance_id_tx"
+  printf "%-14s %s\n" "投票:"         "$vote_choice"
+  if [[ -n "$vote_anchor_url" ]]; then
+    printf "%-14s %s\n" "Anchor URL:"  "$vote_anchor_url"
+    printf "%-14s %s\n" "Anchor Hash:" "$vote_anchor_hash"
+  else
+    printf "%-14s %s\n" "投票理由:"    "(なし)"
+  fi
+  echo -e "${WHITE}--------------------------------------------${NC}"
   echo
 
   if ! Gum_Confirm "この内容でエアギャップ用スクリプトを生成しますか？"; then
@@ -393,11 +613,32 @@ GovernanceSpoVote(){
   local currentSlot
   currentSlot=$(cardano-cli conway query tip ${NODE_NETWORK} | jq -r '.slot')
 
-  # エアギャップ用スクリプト生成
   local script_file="${NODE_HOME}/create_votetx_script"
   local vote_file_name="spo_vote_${governance_id_tx}.json"
   local invalid_hereafter=$(( currentSlot + 10000 ))
 
+  # vote create コマンドをアンカー有無に応じて構築
+  # (HEREDOC内変数展開後に渡すため、改行と \ を文字列として組み立てる)
+  local vc_cmd
+  vc_cmd="cardano-cli conway governance vote create \\"$'\n'
+  vc_cmd+="  --${vote_value_flag} \\"$'\n'
+  vc_cmd+="  --governance-action-tx-id \"${governance_id_tx}\" \\"$'\n'
+  vc_cmd+="  --governance-action-index \"${governance_action_index}\" \\"$'\n'
+  if [[ -n "$vote_anchor_url" ]]; then
+    vc_cmd+="  --anchor-url \"${vote_anchor_url}\" \\"$'\n'
+    vc_cmd+="  --anchor-data-hash \"${vote_anchor_hash}\" \\"$'\n'
+  fi
+  vc_cmd+="  --cold-verification-key-file \"${COLDKEYS_DIR}/${COLD_VKEY_FILENAME}\" \\"$'\n'
+  vc_cmd+="  --out-file \"\${NODE_HOME}/governance/${vote_file_name}\""
+
+  # アンカー情報をair-gapスクリプトの表示行として構築
+  local anchor_echo_lines=""
+  if [[ -n "$vote_anchor_url" ]]; then
+    anchor_echo_lines="printf \"%-20s %s\\\n\" \"Anchor URL:\"  \"${vote_anchor_url}\""$'\n'
+    anchor_echo_lines+="printf \"%-20s %s\\\n\" \"Anchor Hash:\" \"${vote_anchor_hash}\""
+  fi
+
+  # エアギャップ用スクリプト生成
   cat > "$script_file" << AIRGAP_EOF
 #!/bin/bash
 # SPO投票用エアギャップスクリプト (SPOKIT生成)
@@ -415,15 +656,11 @@ echo -e "\${YELLOW}=== SPO投票ファイル作成 ===${NC}"
 printf "%-20s %s\n" "ガバナンスアクションID:" "${governance_id_tx}"
 printf "%-20s %s\n" "Index:"                   "${governance_action_index}"
 printf "%-20s %s\n" "投票:"                     "${vote_value_flag}"
+${anchor_echo_lines}
 echo
 
 # 投票ファイル作成
-cardano-cli conway governance vote create \\
-  --${vote_value_flag} \\
-  --governance-action-tx-id "${governance_id_tx}" \\
-  --governance-action-index "${governance_action_index}" \\
-  --cold-verification-key-file "${COLDKEYS_DIR}/${COLD_VKEY_FILENAME}" \\
-  --out-file "\${NODE_HOME}/governance/${vote_file_name}"
+${vc_cmd}
 if [ \$? -ne 0 ]; then
   echo -e "\${RED}投票ファイルの作成に失敗しました\${NC}"; exit 1
 fi
@@ -488,7 +725,7 @@ echo "  >> [エアギャップ] ⇒ vote-tx.signed ⇒ [BP]"
 AIRGAP_EOF
   chmod 755 "$script_file"
 
-  # エアギャップ操作ガイド表示 (手順1〜3)
+  # エアギャップ操作ガイド (手順1〜3)
   _gov_airgap_guide "$script_file"
 
   # 手順4: 署名ファイル返却
