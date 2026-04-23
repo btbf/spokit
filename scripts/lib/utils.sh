@@ -43,19 +43,28 @@ UfwCheck(){
 #--------------------
 
 SystemUpdate(){
-  LglayStyle "Ubuntuパッケージアップデート開始..."
   sudopass=$(InputSudoPass)
-  echo "$sudopass" | sudo -S apt update -y && sudo apt upgrade -y
-  echo
+  echo "$sudopass" | sudo -S true
+
+  gum spin --spinner dot --title "パッケージリストを更新中..." -- \
+    sudo apt-get update -qq
+
+  echo "パッケージをアップグレード中..."
+  sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+    -o Dpkg::Progress-Fancy=1 \
+    -o APT::Color=1 \
+    2>/dev/null
+
   DglayStyle "Ubuntuパッケージアップデート完了"
-  sleep 3
 }
 
 Installdependencies(){
-  sudo apt install git nano jq bc automake tmux rsync htop curl build-essential \
-    pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev \
-    zlib1g-dev make g++ wget libncursesw5 libtool autoconf liblmdb-dev ccze \
-    -y > /dev/null 2>&1
+  gum spin --spinner dot --title "依存パッケージをインストール中..." -- \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+      git nano jq bc automake tmux rsync htop curl build-essential \
+      pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev \
+      zlib1g-dev make g++ wget libncursesw5 libtool autoconf liblmdb-dev ccze \
+      2>/dev/null
 }
 
 #--------------------
