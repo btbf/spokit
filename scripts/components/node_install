@@ -93,12 +93,28 @@ NodeDownload(){
   local status=$?
   if [ $status -eq 0 ]; then
     LglayStyle "ノードインストール開始"
-    mkdir -p ${HOME}/git/cardano-node
-    cd ${HOME}/git/cardano-node || exit
+    mkdir -p "${HOME}/git/cardano-node"
+    cd "${HOME}/git/cardano-node" || exit 1
     wget -q "$nodeBinary_URL"
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}ノードバイナリのダウンロードに失敗しました。${NC}"; exit 1
+    fi
+    if ! gzip -t "cardano-node-${1}-linux.tar.gz" 2>/dev/null; then
+      echo -e "${RED}ダウンロードファイルが破損しています。${NC}"
+      rm -f "cardano-node-${1}-linux.tar.gz"; exit 1
+    fi
     tar zxvf "cardano-node-${1}-linux.tar.gz" ./bin/cardano-node ./bin/cardano-cli > /dev/null 2>&1
-    sudo cp "$(find ${HOME}/git/cardano-node -type f -name "cardano-cli")" /usr/local/bin/cardano-cli
-    sudo cp "$(find ${HOME}/git/cardano-node -type f -name "cardano-node")" /usr/local/bin/cardano-node
+    if [ $? -ne 0 ]; then
+      echo -e "${RED}ノードバイナリの解凍に失敗しました。${NC}"; exit 1
+    fi
+    local cli_path node_path
+    cli_path=$(find "${HOME}/git/cardano-node" -type f -name "cardano-cli")
+    node_path=$(find "${HOME}/git/cardano-node" -type f -name "cardano-node")
+    if [[ -z "$cli_path" || -z "$node_path" ]]; then
+      echo -e "${RED}バイナリファイルが見つかりません。${NC}"; exit 1
+    fi
+    sudo cp "$cli_path" /usr/local/bin/cardano-cli
+    sudo cp "$node_path" /usr/local/bin/cardano-node
   else
     echo "リリースバージョンではないためソースコードからビルドします"
     #Libsodiumインストール
@@ -110,11 +126,11 @@ NodeDownload(){
     #GHCUPインストール
     GhcupInstall
 
-    cd $HOME/git
+    cd "$HOME/git" || exit 1
     gitURL="https://github.com/IntersectMBO/cardano-node.git"
-    echo "git-URL: $(DglayStyle $gitURL)" 
-    git clone $gitURL
-    cd cardano-node
+    echo "git-URL: $(DglayStyle $gitURL)"
+    git clone "$gitURL" || { echo -e "${RED}リポジトリのクローンに失敗しました。${NC}"; exit 1; }
+    cd cardano-node || exit 1
     git fetch --quiet --all --recurse-submodules --tags
     git checkout --quiet tags/$1
     echo "git tag:$(DglayStyle $1)"
@@ -136,7 +152,7 @@ NodeDownload(){
     fi
   fi
 
-  rm -rf ${HOME}/git/cardano-node
+  rm -rf "${HOME}/git/cardano-node"
   YellowStyle "ノード(v${1})をインストールしました"
   sleep 2
 }

@@ -8,14 +8,23 @@ grafanaInstall(){
     if [[ -z $grafana_path ]]; then
         echo "Grafanaをインストールします..."
         
-        cd $HOME
+        cd "$HOME" || return 1
         sudopass=$(InputSudoPass)
         echo "$sudopass" | sudo -S apt install -y prometheus prometheus-node-exporter
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}prometheusのインストールに失敗しました。${NC}"; return 1
+        fi
         sudo apt-get install -y apt-transport-https software-properties-common
         sudo wget -q -O /usr/share/keyrings/grafana.key https://apt.grafana.com/gpg.key
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Grafana GPGキーの取得に失敗しました。${NC}"; return 1
+        fi
         echo "deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main" > grafana.list
         sudo mv grafana.list /etc/apt/sources.list.d/grafana.list
         sudo apt update && sudo apt install -y grafana
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Grafanaのインストールに失敗しました。${NC}"; return 1
+        fi
 
 
         sudo systemctl enable grafana-server.service

@@ -5,11 +5,30 @@ MithrilBootStrap(){
   sleep 2
   #Rustインストール
   sudo apt install -y libssl-dev build-essential m4 jq > /dev/null 2>&1
-  cd ${HOME}/git
-  mithril_release="$(curl -s https://api.github.com/repos/input-output-hk/mithril/releases/latest | jq -r '.tag_name')"
-  wget -q https://github.com/input-output-hk/mithril/releases/download/${mithril_release}/mithril-${mithril_release}-linux-x64.tar.gz -O mithril.tar.gz
+
+  cd "${HOME}/git" || { echo -e "${RED}ディレクトリへの移動に失敗しました${NC}"; return 1; }
+
+  mithril_release="$(curl -s --max-time 10 https://api.github.com/repos/input-output-hk/mithril/releases/latest | jq -r '.tag_name')"
+  if [[ -z "$mithril_release" || "$mithril_release" == "null" ]]; then
+    echo -e "${RED}Mithrilのバージョン取得に失敗しました。インターネット接続を確認してください。${NC}"
+    return 1
+  fi
+
+  wget -q "https://github.com/input-output-hk/mithril/releases/download/${mithril_release}/mithril-${mithril_release}-linux-x64.tar.gz" -O mithril.tar.gz
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Mithrilのダウンロードに失敗しました。${NC}"
+    rm -f mithril.tar.gz; return 1
+  fi
+  if ! gzip -t mithril.tar.gz 2>/dev/null; then
+    echo -e "${RED}ダウンロードファイルが破損しています。${NC}"
+    rm -f mithril.tar.gz; return 1
+  fi
   tar zxvf mithril.tar.gz mithril-client > /dev/null 2>&1
-  sudo cp mithril-client /usr/local/bin/mithril-client
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Mithrilの解凍に失敗しました。${NC}"
+    rm -f mithril.tar.gz; return 1
+  fi
+  sudo cp mithril-client /usr/local/bin/mithril-client || { echo -e "${RED}mithril-clientのコピーに失敗しました${NC}"; return 1; }
   sudo chmod +x /usr/local/bin/mithril-client
   rm mithril.tar.gz mithril-client
   mithril-client -V
@@ -33,14 +52,29 @@ MithrilBootStrap(){
   esac
 
   export AGGREGATOR_ENDPOINT="https://aggregator.${mithril_network}.api.mithril.network/aggregator"
-  export GENESIS_VERIFICATION_KEY="$(wget -q -O - https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/genesis.vkey)"
-  export ANCILLARY_VERIFICATION_KEY=$(wget -q -O - https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/ancillary.vkey)
+
+  GENESIS_VERIFICATION_KEY="$(wget -q -O - "https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/genesis.vkey")"
+  if [[ -z "$GENESIS_VERIFICATION_KEY" ]]; then
+    echo -e "${RED}Genesis検証キーの取得に失敗しました。${NC}"; return 1
+  fi
+  export GENESIS_VERIFICATION_KEY
+
+  ANCILLARY_VERIFICATION_KEY="$(wget -q -O - "https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/ancillary.vkey")"
+  if [[ -z "$ANCILLARY_VERIFICATION_KEY" ]]; then
+    echo -e "${RED}Ancillary検証キーの取得に失敗しました。${NC}"; return 1
+  fi
+  export ANCILLARY_VERIFICATION_KEY
+
   export NETWORK=${NODE_CONFIG}
   export SNAPSHOT_DIGEST="latest"
 
   LglayStyle "Mithril-DBスナップショットダウンロード開始..."
   YellowStyle "この作業は30分以上かかる場合があります"
   sleep 2
-  mithril-client cardano-db download --download-dir ${NODE_HOME} --include-ancillary latest
+  mithril-client cardano-db download --download-dir "${NODE_HOME}" --include-ancillary latest
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Mithril-DBスナップショットのダウンロードに失敗しました。${NC}"
+    return 1
+  fi
   YellowStyle "Mithril-DBスナップショットをダウンロードしました..."
 }

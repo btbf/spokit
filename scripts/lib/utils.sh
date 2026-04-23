@@ -63,7 +63,11 @@ Installdependencies(){
 #--------------------
 
 SpokitUpdateCheck(){
-  latest_version=$(curl -s https://api.github.com/repos/btbf/spokit/releases/latest | jq -r '.tag_name')
+  latest_version=$(curl -s --max-time 10 https://api.github.com/repos/btbf/spokit/releases/latest | jq -r '.tag_name')
+  if [[ -z "$latest_version" || "$latest_version" == "null" ]]; then
+    echo -e "${YELLOW}バージョン情報の取得に失敗しました。スキップします。${NC}"
+    return
+  fi
 
   if [ "$(printf '%s\n' "$latest_version" "$spokit_version" | sort -V | head -n1)" != "$spokit_version" ]; then
     echo
