@@ -70,8 +70,7 @@ SpokitUpdateCheck(){
     echo -e "${YELLOW}新しいバージョンが利用可能です: ${GREEN}${latest_version}${NC}"
     echo -e "${YELLOW}最新バージョンにアップデートしてください${NC}"
     echo
-    Gum_Confirm_YesNo "spokitをアップデートしますか？" "はい" "いいえ"
-    if [[ ${iniSettings} == "Yes" ]]; then
+    if Gum_Confirm "spokitをアップデートしますか？"; then
       clear
       echo -e "${YELLOW}spokitをアップデートしています...${NC}"
       base_url="https://github.com/btbf/spokit/archive/refs/tags/${spokit_version}.tar.gz"

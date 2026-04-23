@@ -40,8 +40,7 @@ Cli_TxSubmit(){
       FilePathAndHash "${NODE_HOME}/tx.signed"
       echo "上記のハッシュ値とエアギャップに表示されてるハッシュ値と照合してください"
       echo
-      Gum_Confirm_YesNo "ハッシュ値は一致していますか？" "Yes" "No"
-      if [[ ${iniSettings} == "Yes" ]]; then
+      if Gum_Confirm "ハッシュ値は一致していますか？"; then
         break 1
       else
         echo "tx.signedを再度エアギャップからコピーしてください"
@@ -57,8 +56,7 @@ Cli_TxSubmit(){
 
   echo
 
-  Gum_Confirm_YesNo "トランザクションを送信しますか？" "Yes" "再度トランザクション作成から実施してください"
-  if [[ ${iniSettings} == "Yes" ]]; then
+  if Gum_Confirm "トランザクションを送信しますか？"; then
     local tx_result=$(cardano-cli conway transaction submit --tx-file "${NODE_HOME}/tx.signed" $NODE_NETWORK)
     echo
     echo '----------------------------------------'

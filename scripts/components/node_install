@@ -223,10 +223,8 @@ NodeInstall(){
       echo
     fi
 
-    Gum_Confirm_YesNo "SJG推奨バージョン: $(GreenStyle $recommend_node_version) をインストールしますか？" "Yes" "No"
     select_node_version=$recommend_node_version
-
-    if [[ $iniSettings == "Yes" ]]; then
+    if Gum_Confirm "SJG推奨バージョン: $(GreenStyle $recommend_node_version) をインストールしますか？"; then
       IOHKNIX_VERSION=$(curl -s https://raw.githubusercontent.com/IntersectMBO/cardano-node/$select_node_version/flake.lock | jq -r '.nodes.iohkNix.locked.rev')
       SODIUM_VERSION=$(curl -s https://raw.githubusercontent.com/input-output-hk/iohk-nix/$IOHKNIX_VERSION/flake.lock | jq -r '.nodes.sodium.original.rev')
       SECP256K1_VERSION=$(curl -s https://raw.githubusercontent.com/input-output-hk/iohk-nix/$IOHKNIX_VERSION/flake.lock | jq -r '.nodes.secp256k1.original.ref')

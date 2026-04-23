@@ -218,9 +218,7 @@ if [ ! -d "${SPOKIT_HOME}" ]; then
     style "作業ディレクトリ:" "${work_dir}"
     style "UFWステータス:" "${UFW_STATUS}"
     echo
-    gum confirm "この設定でよろしいですか？" --default=true --no-show-help --affirmative="はい" --negative="いいえ" && iniSettings="Yes" || iniSettings="No"
-
-    if [ "${iniSettings}" == "Yes" ]; then
+    if gum confirm "この設定でよろしいですか？" --default=true --no-show-help --affirmative="はい" --negative="いいえ"; then
         if [ ! -d "$NODE_HOME" ]; then
             echo "環境変数を追加します"
             echo PATH="$HOME/.local/bin:$PATH" >> "${HOME}"/.bashrc

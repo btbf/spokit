@@ -94,9 +94,11 @@ Gum_OneSelect(){
   return
 }
 
-Gum_Confirm_YesNo(){
-  gum confirm "${1}" --default=true --affirmative="はい" --negative="いいえ" --no-show-help && iniSettings="${2}" || iniSettings="${3}"
+# はい→終了コード0 / いいえ→終了コード1 を返す
+# 使い方: if Gum_Confirm "質問文"; then ... fi
+Gum_Confirm(){
   echo
+  gum confirm "${1}" --default=true --affirmative="はい" --negative="いいえ" --no-show-help
 }
 
 #--------------------

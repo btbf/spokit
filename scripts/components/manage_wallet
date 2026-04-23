@@ -18,11 +18,10 @@ send_address(){
         printf "出金先: ${GREEN}$destinationAddress${NC}\n"
         echo '------------------------------------------------'
         echo
-        Gum_Confirm_YesNo "出金先はこちらでよろしいですか?" "Yes" "出金先アドレスを再度入力してください"
-        if [ $iniSettings = "Yes" ]; then
+        if Gum_Confirm "出金先はこちらでよろしいですか?"; then
           break 1
         else
-          printf "\n${RED}$iniSettings${NC}\n\n"
+          printf "\n${RED}出金先アドレスを再度入力してください${NC}\n\n"
           continue 1
         fi
       else
@@ -43,11 +42,10 @@ send_address(){
         echo '------------------------------------------------'
         echo
         destinationAddress=$adahandleADDRESS
-        Gum_Confirm_YesNo "出金先はこちらでよろしいですか?" "Yes" "出金先アドレスを再度入力してください"
-        if [ $iniSettings = "Yes" ]; then
+        if Gum_Confirm "出金先はこちらでよろしいですか?"; then
           break 1
         else
-          printf "\n${RED}$iniSettings${NC}\n\n"
+          printf "\n${RED}出金先アドレスを再度入力してください${NC}\n\n"
           continue 1
         fi
       else

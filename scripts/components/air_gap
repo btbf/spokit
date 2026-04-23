@@ -452,8 +452,7 @@ EOF
   echo
   echo -e ${GRAY}"$cmdPoolCert"${NC} | sed 's/   / \\\n/g'
   echo
-  Gum_Confirm_YesNo "この値で${POOL_CERT_FILENAME}を生成しますか？" "Yes" "再度入力してください"
-  if [[ ${iniSettings} == "Yes" ]]; then
+  if Gum_Confirm "この値で${POOL_CERT_FILENAME}を生成しますか？"; then
     script_discription=$(cat <<EOF
 このスクリプトでは以下の処理が実行されます
 1.プール登録証明書 \${GREEN}${POOL_CERT_FILENAME}\${NC} の作成
@@ -469,7 +468,7 @@ EOF
 EOF
     return
   else
-    echo ${iniSettings}
+    echo "再度入力してください"
     return 99
   fi
 

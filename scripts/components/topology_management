@@ -30,8 +30,7 @@ if [ -f $NODE_HOME/${NODE_CONFIG}-topology.json ]; then
     echo
     cat $NODE_HOME/${NODE_CONFIG}-topology.json
     echo
-    Gum_Confirm_YesNo "更新しますか？" "Yes" "No"
-    if [[ ${iniSettings} == "No" ]]; then
+    if ! Gum_Confirm "更新しますか？"; then
         echo "処理を中止しました。"
         Gum_OneSelect "メニューに戻る"
         return 1
@@ -259,13 +258,12 @@ esac
 echo "${createTopology}"
 
 echo
-Gum_Confirm_YesNo "この値で${NODE_TYPE}用のトポロジーファイルを生成しますか？" "Yes" "再度入力してください"
-if [[ ${iniSettings} == "Yes" ]]; then
+if Gum_Confirm "この値で${NODE_TYPE}用のトポロジーファイルを生成しますか？"; then
     echo "${createTopology}" > $NODE_HOME/${NODE_CONFIG}-topology.json
     GreenStyle "$NODE_HOME/${NODE_CONFIG}-topology.jsonを生成しました"
     Gum_OneSelect "メニューに戻る"
 else
-    echo ${iniSettings}
+    echo "再度入力してください"
     echo
     Gum_OneSelect "メニューに戻る"
 fi
