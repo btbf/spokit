@@ -121,7 +121,7 @@ Header(){
   ╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝   ╚═╝
 EOF
   echo -e "${NC}"
-  echo -e "           ${CYAN}Cardano SPO Tool Kit${NC} ${GREEN}v${version}${NC}         "
+  echo -e "           ${CYAN}Cardano SPO Tool Kit${NC} ${GREEN}v${spokit_version}${NC}         "
   echo
   echo -e "${YELLOW}ネットワーク:${NC} ${NODE_CONFIG}"
   echo -e "${YELLOW}ノードタイプ:${NC} ${NODE_TYPE}"
