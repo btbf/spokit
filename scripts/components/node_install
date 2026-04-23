@@ -1,4 +1,9 @@
 #!/bin/bash
+# shellcheck disable=SC1091,SC2086,SC1001,SC2317
+
+#==============================================================================
+# node_install - cardano-node インストール
+#==============================================================================
 
 recommend_node_version="10.5.3"
 recommend_cli_version="10.11.0.0"
@@ -6,8 +11,11 @@ recommend_cabal_version="3.12.1.0"
 recommend_ghc_version="9.6.5"
 
 
+#==============================================================================
+# ソースビルド用サブ関数 (プレビルドバイナリが利用できない場合のみ)
+#==============================================================================
+
 LibsodiumInstall(){
-#Libsodium Install
   sleep 3
   cd ${HOME}/git || return 1
   git clone https://github.com/IntersectMBO/libsodium
@@ -17,7 +25,7 @@ LibsodiumInstall(){
   ./configure
   make
   sudo make install
-  YellowStyle "Libsodiumインストール完了"
+  DglayStyle "Libsodium インストール完了"
 }
 
 Secp256k1Install(){
@@ -30,7 +38,7 @@ Secp256k1Install(){
   ./configure --prefix=/usr --enable-module-schnorrsig --enable-experimental
   make
   sudo make install
-  YellowStyle "Secp256k1インストール完了"
+  DglayStyle "Secp256k1 インストール完了"
 }
 
 BlstInstall(){
@@ -56,10 +64,10 @@ BlstInstall(){
 		EOF
 
   sudo cp libblst.pc /usr/local/lib/pkgconfig/
-  sudo cp bindings/blst_aux.h bindings/blst.h bindings/blst.hpp  /usr/local/include/
+  sudo cp bindings/blst_aux.h bindings/blst.h bindings/blst.hpp /usr/local/include/
   sudo cp libblst.a /usr/local/lib
   sudo chmod u=rw,go=r /usr/local/{lib/{libblst.a,pkgconfig/libblst.pc},include/{blst.{h,hpp},blst_aux.h}}
-  YellowStyle "blstインストール完了"
+  DglayStyle "blst インストール完了"
 }
 
 GhcupInstall(){
@@ -77,195 +85,264 @@ GhcupInstall(){
   ghcup upgrade
   ghcup install cabal $recommend_cabal_version
   ghcup set cabal $recommend_cabal_version
-
   ghcup install ghc $recommend_ghc_version
   ghcup set ghc $recommend_ghc_version
 
   cabal update
   cabal --version; ghc --version
-  YellowStyle "GHCUPインストール完了"
+  DglayStyle "GHCUP インストール完了"
 }
 
 
-NodeDownload(){
-  nodeBinary_URL="https://github.com/IntersectMBO/cardano-node/releases/download/${1}/cardano-node-${1}-linux.tar.gz"
-  wget --spider -q "$nodeBinary_URL"
-  local status=$?
-  if [ $status -eq 0 ]; then
-    LglayStyle "ノードインストール開始"
-    mkdir -p "${HOME}/git/cardano-node"
-    cd "${HOME}/git/cardano-node" || return 1
-    wget -q "$nodeBinary_URL"
-    if [ $? -ne 0 ]; then
-      echo -e "${RED}ノードバイナリのダウンロードに失敗しました。${NC}"; return 1
-    fi
-    if ! gzip -t "cardano-node-${1}-linux.tar.gz" 2>/dev/null; then
-      echo -e "${RED}ダウンロードファイルが破損しています。${NC}"
-      rm -f "cardano-node-${1}-linux.tar.gz"; return 1
-    fi
-    tar zxvf "cardano-node-${1}-linux.tar.gz" ./bin/cardano-node ./bin/cardano-cli > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-      echo -e "${RED}ノードバイナリの解凍に失敗しました。${NC}"; return 1
-    fi
-    local cli_path node_path
-    cli_path=$(find "${HOME}/git/cardano-node" -type f -name "cardano-cli")
-    node_path=$(find "${HOME}/git/cardano-node" -type f -name "cardano-node")
-    if [[ -z "$cli_path" || -z "$node_path" ]]; then
-      echo -e "${RED}バイナリファイルが見つかりません。${NC}"; return 1
-    fi
-    sudo cp "$cli_path" /usr/local/bin/cardano-cli
-    sudo cp "$node_path" /usr/local/bin/cardano-node
-  else
-    echo "リリースバージョンではないためソースコードからビルドします"
-    #Libsodiumインストール
-    LibsodiumInstall
-    #Secp256インストール
-    Secp256k1Install
-    #Blstインストール
-    BlstInstall
-    #GHCUPインストール
-    GhcupInstall
-
-    cd "$HOME/git" || return 1
-    gitURL="https://github.com/IntersectMBO/cardano-node.git"
-    echo "git-URL: $(DglayStyle $gitURL)"
-    git clone "$gitURL" || { echo -e "${RED}リポジトリのクローンに失敗しました。${NC}"; return 1; }
-    cd cardano-node || return 1
-    git fetch --quiet --all --recurse-submodules --tags
-    git checkout --quiet tags/$1
-    echo "git tag:$(DglayStyle $1)"
-    cabal clean
-    cabal update
-    cabal configure --with-compiler=ghc-$recommend_ghc_version
-
-    LglayStyle "ソースコードからビルド開始..."
-    YellowStyle "この作業は30分以上かかる場合があります"
-    cabal build all cardano-cli
-    local node_install_status=$?
-    if [[ $node_install_status -eq 0 ]]; then
-      GreenStyle "ビルド成功"
-      echo
-      sudo cp $(./scripts/bin-path.sh cardano-cli) /usr/local/bin/cardano-cli
-      sudo cp $(./scripts/bin-path.sh cardano-node) /usr/local/bin/cardano-node
-    else
-      node_install_result="failure"
-    fi
-  fi
-
-  rm -rf "${HOME}/git/cardano-node"
-  YellowStyle "ノード(v${1})をインストールしました"
-  sleep 2
-}
-
+#==============================================================================
+# NodeConfigDownload - ノード設定ファイル一式ダウンロード
+#==============================================================================
 
 NodeConfigDownload(){
-  LglayStyle "ノード設定ファイルをダウンロードします..."
-  sleep 2
-  mkdir -p ${NODE_HOME}
-  cd ${NODE_HOME} || return 1
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-byron-genesis.json -O ${NODE_CONFIG}-byron-genesis.json
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-topology.json -O ${NODE_CONFIG}-topology.json
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-shelley-genesis.json -O ${NODE_CONFIG}-shelley-genesis.json
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-alonzo-genesis.json -O ${NODE_CONFIG}-alonzo-genesis.json
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-conway-genesis.json -O ${NODE_CONFIG}-conway-genesis.json
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-checkpoints.json -O ${NODE_CONFIG}-checkpoints.json
-  wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-peer-snapshot.json -O ${NODE_CONFIG}-peer-snapshot.json
-  if [ "${NODE_TYPE}" = "リレー" ]; then
-    wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-config.json -O ${NODE_CONFIG}-config.json
-  else
-    wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-config-bp.json -O ${NODE_CONFIG}-config.json
-  fi
-  #
+  LglayStyle "ノード設定ファイルをダウンロード中..."
+  mkdir -p "${NODE_HOME}"
+  cd "${NODE_HOME}" || return 1
 
-  YellowStyle "ノード設定ファイルをダウンロードしました"
+  local base="https://spojapanguild.net/node_config/${recommend_node_version}"
+  local ok=true
+
+  for fname in \
+    "${NODE_CONFIG}-byron-genesis.json" \
+    "${NODE_CONFIG}-shelley-genesis.json" \
+    "${NODE_CONFIG}-alonzo-genesis.json" \
+    "${NODE_CONFIG}-conway-genesis.json" \
+    "${NODE_CONFIG}-topology.json" \
+    "${NODE_CONFIG}-checkpoints.json" \
+    "${NODE_CONFIG}-peer-snapshot.json"; do
+    if wget -q "${base}/${fname}" -O "${fname}" 2>/dev/null; then
+      echo -e "  ${GREEN}✓${NC} ${fname}"
+    else
+      echo -e "  ${YELLOW}⚠ ${fname} の取得に失敗しました${NC}"
+      ok=false
+    fi
+  done
+
+  local config_fname
+  if [ "${NODE_TYPE}" = "リレー" ]; then
+    config_fname="${NODE_CONFIG}-config.json"
+  else
+    config_fname="${NODE_CONFIG}-config-bp.json"
+  fi
+  if wget -q "${base}/${config_fname}" -O "${NODE_CONFIG}-config.json" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} ${NODE_CONFIG}-config.json"
+  else
+    echo -e "  ${YELLOW}⚠ config.json の取得に失敗しました${NC}"
+    ok=false
+  fi
+
+  if [[ "$ok" == "true" ]]; then
+    DglayStyle "ノード設定ファイルをダウンロードしました"
+  else
+    echo -e "${YELLOW}一部のファイル取得に失敗しました。後で再取得してください。${NC}"
+  fi
+  echo
 }
 
-GliveViewDowndload(){
-  sleep 2
-  mkdir -p ${NODE_HOME}/scripts
-  cd ${NODE_HOME}/scripts || return 1
-  sudo sudo apt install bc tcptraceroute -y > /dev/null 2>&1
 
-  curl -s -o gLiveView.sh https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/gLiveView.sh
-  curl -s -o env https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/env
+#==============================================================================
+# GliveViewDownload - gLiveView セットアップ
+#==============================================================================
+
+GliveViewDownload(){
+  LglayStyle "gLiveView をセットアップ中..."
+  mkdir -p "${NODE_HOME}/scripts"
+  cd "${NODE_HOME}/scripts" || return 1
+
+  sudo apt install bc tcptraceroute -y > /dev/null 2>&1
+
+  curl -s -o gLiveView.sh \
+    https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/gLiveView.sh
+  curl -s -o env \
+    https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/env
   chmod 755 gLiveView.sh
 
-  sed -i ${NODE_HOME}/scripts/env \
-  -e '1,73s!#CNODE_HOME="/opt/cardano/cnode"!CNODE_HOME="'${NODE_HOME}'"!' \
-  -e '1,73s!#CNODE_PORT=6000!CNODE_PORT='"${1}"'!' \
-  -e '1,73s!#UPDATE_CHECK="Y"!UPDATE_CHECK="N"!' \
-  -e '1,73s!#PROM_HOST=127.0.0.1!PROM_HOST=127.0.0.1!' \
-  -e '1,73s!#PROM_PORT=12798!PROM_PORT=12798!' \
-  -e '1,73s!#CONFIG="${CNODE_HOME}/files/config.json"!CONFIG="${CNODE_HOME}/'${NODE_CONFIG}'-config.json"!' \
-  -e '1,73s!#SOCKET="${CNODE_HOME}/sockets/node0.socket"!SOCKET="${CNODE_HOME}/db/socket"!'
+  sed -i "${NODE_HOME}/scripts/env" \
+    -e '1,73s!#CNODE_HOME="/opt/cardano/cnode"!CNODE_HOME="'"${NODE_HOME}"'"!' \
+    -e '1,73s!#CNODE_PORT=6000!CNODE_PORT='"${1}"'!' \
+    -e '1,73s!#UPDATE_CHECK="Y"!UPDATE_CHECK="N"!' \
+    -e '1,73s!#PROM_HOST=127.0.0.1!PROM_HOST=127.0.0.1!' \
+    -e '1,73s!#PROM_PORT=12798!PROM_PORT=12798!' \
+    -e '1,73s!#CONFIG="${CNODE_HOME}/files/config.json"!CONFIG="${CNODE_HOME}/'"${NODE_CONFIG}"'-config.json"!' \
+    -e '1,73s!#SOCKET="${CNODE_HOME}/sockets/node0.socket"!SOCKET="${CNODE_HOME}/db/socket"!'
 
-  YellowStyle "gliveViewをインストールしました..."
+  DglayStyle "gLiveView をセットアップしました"
+  echo
 }
 
-#ノードインストール
+
+#==============================================================================
+# NodeInstall - メインインストール関数
+#==============================================================================
+
 NodeInstall(){
-  node_path=$(which cardano-node)
-  if [ ! -e "${node_path}" ]; then
   clear
-  case "$NODE_TYPE" in
-
-  "ブロックプロデューサー" )
-    node_run_filename="startBlockProducingNode.sh"
-    ;;
-  "リレー" )
-    node_run_filename="startRelayNode1.sh"
-    ;;
-  esac
-
   Header "ノードインストール"
-  echo
-  sleep 2
 
-  #ノードバージョン選択
-
-  repo=IntersectMBO/cardano-node
-  latest_node_version=$(curl -s --url "https://api.github.com/repos/$repo/releases/latest" | grep -oP '"tag_name": "\K(.*)(?=")')
-  # if [[ $SYNC_NETWORK == "mainnet" ]]; then
-
-    #推奨と最新に差異がある場合
-    if [[ $latest_node_version != $recommend_node_version ]]; then
-      echo
-      printf "最新バージョン: $(YellowStyle $latest_node_version)\n"
-      printf "SJG推奨バージョン: $(GreenStyle $recommend_node_version)\n"
-
-      echo
-      echo "最新バージョンとSJG推奨バージョンとに差異があります"
-      echo "最新バージョンは現在SJGで検証中のため次のリリースをお待ちください。最新バージョンをインストールしたい場合は手動インストールを行ってください"
-      echo
-    fi
-
-    select_node_version=$recommend_node_version
-    if Gum_Confirm "SJG推奨バージョン: $(GreenStyle $recommend_node_version) をインストールしますか？"; then
-      IOHKNIX_VERSION=$(curl -s https://raw.githubusercontent.com/IntersectMBO/cardano-node/$select_node_version/flake.lock | jq -r '.nodes.iohkNix.locked.rev')
-      SODIUM_VERSION=$(curl -s https://raw.githubusercontent.com/input-output-hk/iohk-nix/$IOHKNIX_VERSION/flake.lock | jq -r '.nodes.sodium.original.rev')
-      SECP256K1_VERSION=$(curl -s https://raw.githubusercontent.com/input-output-hk/iohk-nix/$IOHKNIX_VERSION/flake.lock | jq -r '.nodes.secp256k1.original.ref')
-      BLST_VERSION=$(curl -s https://raw.githubusercontent.com/input-output-hk/iohk-nix/master/flake.lock | jq -r '.nodes.blst.original.ref')
-    else
-      return
-    fi
-
-  #ノード起動ポート選択
-  select_port "node"
-  
-  SystemUpdate
-  
-  #ノードバイナリダウンロード
-  NodeDownload $select_node_version
-
-  if [[ $node_install_result == "failure" ]]; then
-    ErrorStyle "ビルド失敗"
+  #------------------------------------------------------------
+  # インストール済みチェック
+  #------------------------------------------------------------
+  if command -v cardano-node >/dev/null 2>&1; then
+    local cur_node cur_cli
+    cur_node=$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "不明")
+    cur_cli=$(cardano-cli  version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "不明")
+    echo -e "${YELLOW}cardano-node はすでにインストールされています${NC}"
+    printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" "$cur_node"
+    printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:"  "$cur_cli"
+    echo
     Gum_OneSelect "戻る"
     return
   fi
-  #ノードコンフィグファイルダウンロード
+
+  #------------------------------------------------------------
+  # インストールするバージョン表示
+  #------------------------------------------------------------
+  echo -e "${YELLOW}インストールするバージョン:${NC}"
+  printf "  %-16s ${CYAN}%s${NC}\n" "cardano-node:" "$recommend_node_version"
+  printf "  %-16s ${CYAN}%s${NC}\n" "cardano-cli:"  "$recommend_cli_version"
+  echo
+
+  echo -e "${YELLOW}インストール内容:${NC}"
+  echo "  ・cardano-node / cardano-cli (プレビルドバイナリ)"
+  echo "  ・ノード設定ファイル一式 (SPO JAPAN GUILD)"
+  echo "  ・起動スクリプト"
+  echo "  ・gLiveView"
+  echo "  ・systemd サービス (cardano-node)"
+  echo
+
+  #------------------------------------------------------------
+  # ノード起動ポート選択
+  #------------------------------------------------------------
+  select_port "node"
+  echo
+
+  #------------------------------------------------------------
+  # DB同期方法の選択
+  #------------------------------------------------------------
+  echo -e "${YELLOW}初回DB同期方法について${NC}"
+  echo "  Mithril: スナップショットから最速同期 (推奨・30分以上)"
+  echo "  通常起動: ジェネシスブロックから同期 (数日かかる場合があります)"
+  echo
+  local sync_method
+  sync_method=$(gum choose --height=4 --no-show-help \
+    --header="DB同期方法を選択してください" \
+    --header.foreground="244" \
+    "Mithrilスナップショットで同期 (推奨・最速)" \
+    "通常起動 (ジェネシスから同期)") || return
+  echo
+
+  #------------------------------------------------------------
+  # 最終確認
+  #------------------------------------------------------------
+  local node_run_filename
+  case "$NODE_TYPE" in
+    "ブロックプロデューサー" ) node_run_filename="startBlockProducingNode.sh" ;;
+    "リレー"               ) node_run_filename="startRelayNode1.sh" ;;
+  esac
+
+  echo -e "${WHITE}============================================${NC}"
+  echo -e "${YELLOW}  インストール内容の確認${NC}"
+  echo -e "${WHITE}============================================${NC}"
+  printf "  %-20s ${CYAN}%s${NC}\n"  "cardano-node:"     "$recommend_node_version"
+  printf "  %-20s ${CYAN}%s${NC}\n"  "cardano-cli:"      "$recommend_cli_version"
+  printf "  %-20s %s\n"              "ノードタイプ:"     "$NODE_TYPE"
+  printf "  %-20s %s\n"              "ネットワーク:"     "$NODE_CONFIG"
+  printf "  %-20s %s\n"              "ポート番号:"       "$port_number"
+  printf "  %-20s %s\n"              "作業ディレクトリ:" "$NODE_HOME"
+  printf "  %-20s %s\n"              "DB同期:" \
+    "$([[ "$sync_method" == *Mithril* ]] && echo "Mithrilで同期" || echo "ジェネシスから通常同期")"
+  echo -e "${WHITE}============================================${NC}"
+  echo
+
+  if ! Gum_Confirm "この内容でインストールを実行しますか？"; then
+    return
+  fi
+
+  #------------------------------------------------------------
+  # STEP 1: Ubuntu パッケージアップデート
+  #------------------------------------------------------------
+  LglayStyle "Ubuntu パッケージをアップデート中..."
+  SystemUpdate
+  Installdependencies
+  echo
+
+  #------------------------------------------------------------
+  # STEP 2: バイナリダウンロード
+  #------------------------------------------------------------
+  local dl_dir="$HOME/git/cardano-node-install"
+  rm -rf "$dl_dir" && mkdir -p "$dl_dir"
+
+  local tar_url="https://github.com/IntersectMBO/cardano-node/releases/download/${recommend_node_version}/cardano-node-${recommend_node_version}-linux-amd64.tar.gz"
+  local tar_file="$dl_dir/cardano-node-${recommend_node_version}-linux-amd64.tar.gz"
+
+  gum spin --spinner dot \
+    --title "cardano-node v${recommend_node_version} をダウンロード中..." -- \
+    wget -q "$tar_url" -O "$tar_file"
+  if [ $? -ne 0 ] || ! gzip -t "$tar_file" 2>/dev/null; then
+    echo -e "${RED}ダウンロードに失敗しました。インターネット接続を確認してください。${NC}"
+    rm -rf "$dl_dir"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  gum spin --spinner dot --title "展開中..." -- \
+    tar zxf "$tar_file" -C "$dl_dir" \
+      ./bin/cardano-node ./bin/cardano-cli ./bin/snapshot-converter 2>/dev/null
+  if [ $? -ne 0 ]; then
+    tar zxf "$tar_file" -C "$dl_dir" 2>/dev/null || true
+  fi
+  rm -f "$tar_file"
+
+  local node_bin cli_bin snap_conv_bin
+  node_bin=$(find "$dl_dir" -type f -name "cardano-node"          2>/dev/null | head -1)
+  cli_bin=$(find  "$dl_dir" -type f -name "cardano-cli"           2>/dev/null | head -1)
+  snap_conv_bin=$(find "$dl_dir" -type f -name "snapshot-converter" 2>/dev/null | head -1)
+
+  if [[ -z "$node_bin" ]]; then
+    echo -e "${RED}cardano-node バイナリが見つかりません。${NC}"
+    rm -rf "$dl_dir"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  local new_node new_cli
+  new_node=$("$node_bin" version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "確認失敗")
+  new_cli=$([[ -n "$cli_bin" ]] && "$cli_bin" version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "")
+
+  echo -e "${YELLOW}ダウンロードしたバイナリのバージョン:${NC}"
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" "$new_node"
+  [[ -n "$new_cli" ]] && printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" "$new_cli"
+  echo
+
+  #------------------------------------------------------------
+  # STEP 3: バイナリ配置
+  #------------------------------------------------------------
+  LglayStyle "バイナリを配置中..."
+  sudo cp "$node_bin" /usr/local/bin/cardano-node
+  [[ -n "$cli_bin" ]] && sudo cp "$cli_bin" /usr/local/bin/cardano-cli
+  [[ -n "$snap_conv_bin" ]] && sudo cp "$snap_conv_bin" /usr/local/bin/snapshot-converter
+  rm -rf "$dl_dir"
+  DglayStyle "バイナリを配置しました"
+  echo -e "  cardano-node: ${GREEN}$(cardano-node version 2>/dev/null | head -1)${NC}"
+  [[ -n "$cli_bin" ]] && echo -e "  cardano-cli:  ${GREEN}$(cardano-cli version 2>/dev/null | head -1)${NC}"
+  echo
+
+  #------------------------------------------------------------
+  # STEP 4: 設定ファイルダウンロード
+  #------------------------------------------------------------
   NodeConfigDownload
 
-cat <<-EOF > ${NODE_HOME}/${node_run_filename}
+  #------------------------------------------------------------
+  # STEP 5: 起動スクリプト作成
+  #------------------------------------------------------------
+  LglayStyle "起動スクリプトを作成中..."
+  mkdir -p "${NODE_HOME}"
+
+  cat > "${NODE_HOME}/${node_run_filename}" <<EOF
 #!/bin/bash
 DIRECTORY=${NODE_HOME}
 PORT=${port_number}
@@ -274,22 +351,30 @@ TOPOLOGY=\${DIRECTORY}/${NODE_CONFIG}-topology.json
 DB_PATH=\${DIRECTORY}/db
 SOCKET_PATH=\${DIRECTORY}/db/socket
 CONFIG=\${DIRECTORY}/${NODE_CONFIG}-config.json
-/usr/local/bin/cardano-node +RTS -N --disable-delayed-os-memory-return -I0.1 -Iw300 -A16m -F1.5 -H2500M -RTS run --topology \${TOPOLOGY} --database-path \${DB_PATH} --socket-path \${SOCKET_PATH} --host-addr \${HOSTADDR} --port \${PORT} --config \${CONFIG}
+/usr/local/bin/cardano-node +RTS -N --disable-delayed-os-memory-return -I0.1 -Iw300 -A16m -F1.5 -H2500M -RTS run \\
+  --topology \${TOPOLOGY} \\
+  --database-path \${DB_PATH} \\
+  --socket-path \${SOCKET_PATH} \\
+  --host-addr \${HOSTADDR} \\
+  --port \${PORT} \\
+  --config \${CONFIG}
 EOF
 
-  cd ${NODE_HOME} || return 1
-  chmod +x ${node_run_filename}
+  chmod +x "${NODE_HOME}/${node_run_filename}"
+  DglayStyle "起動スクリプトを作成しました"
+  echo
 
-  YellowStyle "起動スクリプトを作成しました"
+  #------------------------------------------------------------
+  # STEP 6: gLiveView セットアップ
+  #------------------------------------------------------------
+  GliveViewDownload "$port_number"
 
-  #gLiveViewインストール
-  GliveViewDowndload $port_number
+  #------------------------------------------------------------
+  # STEP 7: systemd サービス作成
+  #------------------------------------------------------------
+  LglayStyle "systemd サービスを作成中..."
 
-  #Mithril DBブートストラップ
-  MithrilBootStrap
-
-  sleep 2
-cat > ${NODE_HOME}/cardano-node.service <<-EOF
+  cat > "${NODE_HOME}/cardano-node.service" <<EOF
 # The Cardano node service (part of systemd)
 # file: /etc/systemd/system/cardano-node.service
 
@@ -315,49 +400,110 @@ SyslogIdentifier=cardano-node
 WantedBy    = multi-user.target
 EOF
 
-  sudopass=$(InputSudoPass)
-  echo "$sudopass" | sudo -S cp ${NODE_HOME}/cardano-node.service /etc/systemd/system/cardano-node.service
+  sudo cp "${NODE_HOME}/cardano-node.service" /etc/systemd/system/cardano-node.service
   sudo chmod 644 /etc/systemd/system/cardano-node.service
   sudo systemctl daemon-reload
   sudo systemctl enable cardano-node
-  sudo systemctl start cardano-node
-
-  YellowStyle "ノード起動サービスファイルを作成しました"
-  LglayStyle "カルダノノード起動中..."
-  nodeSyncCheck
-  if [[ -n $slot_value ]]; then
-    echo
-    YellowStyle "日常オペレーションでノードの起動状況を確認するには、glive コマンドを使用してください。"
-    Gum_OneSelect "戻る"
-    echo
-  else
-    echo "ノード起動に失敗しました"
-    echo "エラーメッセージの原因を解決してください"
-    Gum_OneSelect "戻る"
-  fi
-else 
-  cardano-node version
-  cardano-cli version
+  DglayStyle "systemd サービスを作成しました"
   echo
-  YellowStyle "cardano-nodeはインストール済みです"
-  Gum_OneSelect "戻る"
-fi
-}
 
+  #------------------------------------------------------------
+  # STEP 8: Mithrilスナップショット同期 (選択時のみ)
+  #------------------------------------------------------------
+  if [[ "$sync_method" == *Mithril* ]]; then
+    echo -e "${WHITE}--------------------------------------------${NC}"
+    LglayStyle "Mithrilスナップショット同期を開始します..."
+    echo -e "${YELLOW}この作業は30分以上かかる場合があります${NC}"
+    echo
 
-NodeVirsionUp(){
-  echo "起動中のノードを停止します..."
+    mkdir -p "$HOME/git"
+    cd "$HOME/git" || true
+    local mithril_release
+    mithril_release=$(curl -s --max-time 10 \
+      https://api.github.com/repos/input-output-hk/mithril/releases/latest | jq -r '.tag_name')
+    if [[ -n "$mithril_release" && "$mithril_release" != "null" ]]; then
+      gum spin --spinner dot --title "mithril-client ${mithril_release} をダウンロード中..." -- \
+        wget -q \
+          "https://github.com/input-output-hk/mithril/releases/download/${mithril_release}/mithril-${mithril_release}-linux-x64.tar.gz" \
+          -O mithril.tar.gz
+      if gzip -t mithril.tar.gz 2>/dev/null; then
+        tar zxf mithril.tar.gz mithril-client > /dev/null 2>&1
+        sudo cp mithril-client /usr/local/bin/mithril-client
+        sudo chmod +x /usr/local/bin/mithril-client
+        rm -f mithril.tar.gz mithril-client
+        echo -e "  mithril-client: ${GREEN}$(mithril-client -V 2>/dev/null)${NC}"
+      else
+        echo -e "${YELLOW}mithril-client のダウンロードをスキップ (既存を使用)${NC}"
+        rm -f mithril.tar.gz
+      fi
+    fi
 
-  sudopass=$(InputSudoPass)
-  echo "$sudopass" | sudo -S systemctl stop cardano-node
-  echo "ノードを停止しました"
-  
-  SystemUpdate
-  NodeVersionSelect
-  if [[ $select_node_version == "キャンセル" ]]; then
-    echo "アップデートはキャンセルされました"
-    Gum_OneSelect "戻る"
-  else
-    NodeDownload $select_node_version
+    local mithril_network
+    case "${NODE_CONFIG}" in
+      mainnet) mithril_network="release-mainnet" ;;
+      preprod) mithril_network="release-preprod" ;;
+      preview) mithril_network="pre-release-preview" ;;
+      *)       mithril_network="release-mainnet" ;;
+    esac
+
+    export AGGREGATOR_ENDPOINT="https://aggregator.${mithril_network}.api.mithril.network/aggregator"
+
+    GENESIS_VERIFICATION_KEY=$(wget -q -O - \
+      "https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/genesis.vkey" \
+      2>/dev/null)
+    export GENESIS_VERIFICATION_KEY
+
+    ANCILLARY_VERIFICATION_KEY=$(wget -q -O - \
+      "https://raw.githubusercontent.com/input-output-hk/mithril/main/mithril-infra/configuration/${mithril_network}/ancillary.vkey" \
+      2>/dev/null)
+    export ANCILLARY_VERIFICATION_KEY
+    export SNAPSHOT_DIGEST="latest"
+
+    if [[ -z "$GENESIS_VERIFICATION_KEY" || -z "$ANCILLARY_VERIFICATION_KEY" ]]; then
+      echo -e "${RED}Mithril検証キーの取得に失敗しました。ノードを通常起動します。${NC}"
+    else
+      rm -rf "${NODE_HOME}/db"
+      LglayStyle "Mithrilスナップショットをダウンロード中..."
+      mithril-client cardano-db download \
+        --download-dir "${NODE_HOME}" \
+        --include-ancillary latest
+      if [ $? -ne 0 ]; then
+        echo -e "${RED}スナップショットのダウンロードに失敗しました${NC}"
+        echo -e "${YELLOW}ノードを起動して通常同期で復旧してください${NC}"
+      else
+        DglayStyle "スナップショットを復元しました"
+      fi
+    fi
+    echo
   fi
+
+  #------------------------------------------------------------
+  # STEP 9: ノード起動
+  #------------------------------------------------------------
+  LglayStyle "cardano-node を起動中..."
+  sudo systemctl start cardano-node
+  sleep 3
+
+  #------------------------------------------------------------
+  # STEP 10: 同期確認
+  #------------------------------------------------------------
+  nodeSyncCheck
+
+  #------------------------------------------------------------
+  # 完了サマリー
+  #------------------------------------------------------------
+  echo
+  echo -e "${WHITE}============================================${NC}"
+  YellowStyle "ノードインストール完了"
+  echo -e "${WHITE}============================================${NC}"
+  echo
+  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" \
+    "$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
+  [[ -n "$cli_bin" ]] && printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:" \
+    "$(cardano-cli version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)"
+  echo
+  echo -e "${YELLOW}起動ログ確認:${NC}"
+  echo "  glive  または  sudo journalctl -u cardano-node -f"
+  echo
+  Gum_OneSelect "戻る"
 }
