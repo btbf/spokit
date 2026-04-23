@@ -87,19 +87,25 @@ Cli_TxSubmit(){
       printf "\n${GREEN}Tx送信に成功しました${NC}\n"
       echo
       printf "\n${YELLOW}Tx承認を確認しています。このまましばらくお待ち下さい...${NC}\n\n"
+      local tx_confirm_count=0
+      local tx_confirm_limit=180  # 180×10秒 = 30分
       while :
       do
-        koios_tx_status=$(curl -s -X POST "$KOIOS_API/tx_status" \
+        koios_tx_status=$(curl -s --max-time 10 -X POST "$KOIOS_API/tx_status" \
           -H "Accept: application/json" \
           -H "content-type: application/json" \
-          -d "{\"_tx_hashes\":[\"${tx_id}\"]}" | jq -r '.[].num_confirmations')
-        if [[ ${koios_tx_status} != "null" ]] && [ ${koios_tx_status} -gt 1 ]; then
+          -d "{\"_tx_hashes\":[\"${tx_id}\"]}" | jq -r '.[].num_confirmations // empty')
+        if [[ "$koios_tx_status" =~ ^[0-9]+$ ]] && [[ "$koios_tx_status" -gt 1 ]]; then
           printf "確認済みブロック:$koios_tx_status ${GREEN}Txが承認されました${NC}\n\n"
           sleep 3s
           break
-        else
-          sleep 10s
         fi
+        tx_confirm_count=$((tx_confirm_count + 1))
+        if [[ $tx_confirm_count -ge $tx_confirm_limit ]]; then
+          printf "${YELLOW}タイムアウト: Cardanoscanで手動確認してください${NC}\n"
+          break
+        fi
+        sleep 10s
       done
       echo
       Gum_OneSelect "戻る"

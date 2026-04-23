@@ -95,11 +95,11 @@ while IFS= read -r line; do
                 LglayStyle "チェーン同期を検知しました"
                 LglayStyle "エンドポイントslot値を確認します..."
                 # RunServer検知後、localhost:12798/metrics をポーリング
+                local metrics_elapsed=0
+                local metrics_limit=60  # 60秒待機後タイムアウト
                 while true; do
-                    # metrics の内容から 'slot' の行を抽出（先頭が "slot" であると仮定）
-                    slot_line=$(curl -s http://localhost:12798/metrics | grep 'cardano_node_metrics_slotInEpoch_int')
+                    slot_line=$(curl -s --max-time 5 http://localhost:12798/metrics | grep 'cardano_node_metrics_slotInEpoch_int')
                     if [ -n "$slot_line" ]; then
-                        # slot 行が存在すれば、値を抽出（値が空でなければ終了）
                         slot_value=$(echo "$slot_line" | awk '{print $2}')
                         if [ -n "$slot_value" ]; then
                             YellowStyle "エポックスロットを検出しました: $slot_value"
@@ -108,13 +108,25 @@ while IFS= read -r line; do
                             break 2
                         fi
                     fi
-                    # まだ slot 値がなければ 1秒待機
+                    metrics_elapsed=$((metrics_elapsed + 1))
+                    if [[ $metrics_elapsed -ge $metrics_limit ]]; then
+                        stop_spinner
+                        ErrorStyle "タイムアウト: メトリクスの取得に失敗しました。ノードの状態を確認してください。"
+                        exit 1
+                    fi
                     sleep 1
                 done
             fi
             ;;
     esac
-done < <(sudo journalctl -u cardano-node -f 2>/dev/null)
+done < <(timeout 3600 sudo journalctl -u cardano-node -f 2>/dev/null)
+
+local journal_exit=$?
+stop_spinner
+if [[ $journal_exit -eq 124 ]]; then
+  ErrorStyle "タイムアウト: ノードが1時間以内に起動しませんでした。ログを確認してください。"
+  exit 1
+fi
 }
 
 #nodeSyncCheck

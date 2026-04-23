@@ -78,6 +78,12 @@ SpokitUpdateCheck(){
       wget -q "${base_url}" -O "$HOME/spokit.tar.gz"
       if [ $? -ne 0 ]; then
         echo -e "${RED}SPOKITのダウンロードに失敗しました。インターネット接続を確認してください。${NC}"
+        rm -f "$HOME/spokit.tar.gz"
+        exit 1
+      fi
+      if ! gzip -t "$HOME/spokit.tar.gz" 2>/dev/null; then
+        echo -e "${RED}ダウンロードファイルが破損しています。再度お試しください。${NC}"
+        rm -f "$HOME/spokit.tar.gz"
         exit 1
       fi
       tar -xzf "$HOME/spokit.tar.gz"
