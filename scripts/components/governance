@@ -1,0 +1,753 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC1091,SC2086,SC1001,SC2317
+
+#==============================================================================
+# governance - ガバナンス管理コンポーネント
+#   - SPO投票 (ガバナンスアクションへの賛成/反対/棄権)
+#   - DRep委任 (DRep指定/自動棄権/自動不信任)
+#==============================================================================
+
+#--------------------
+# 内部ヘルパー関数
+#--------------------
+
+# アンカーURLからJSONをダウンロード (IPFS対応)
+_gov_download_anchor(){
+  local src_url=$1
+  local out_file=$2
+  local cid=""
+  local -a urls=()
+
+  rm -f "$out_file"
+
+  if [[ "$src_url" == ipfs://* ]]; then
+    cid="${src_url#ipfs://}"
+    urls+=("https://ipfs.io/ipfs/${cid}")
+    urls+=("https://ipfs.filebase.io/ipfs/${cid}")
+    urls+=("https://gateway.pinata.cloud/ipfs/${cid}")
+  else
+    urls+=("$src_url")
+  fi
+
+  for url in "${urls[@]}"; do
+    curl -sS --connect-timeout 5 --max-time 10 -o "$out_file" "$url" 2>/dev/null || true
+    if [ -s "$out_file" ]; then
+      return 0
+    fi
+  done
+
+  rm -f "$out_file"
+  return 1
+}
+
+# DRep委任状況をKoios APIで確認し表示
+_gov_check_drep_delegate(){
+  if [ ! -f "${NODE_HOME}/${STAKE_ADDR_FILENAME}" ]; then
+    echo -e "${YELLOW}DRep委任状況: ステークアドレスファイル未検出 (${STAKE_ADDR_FILENAME})${NC}"
+    return
+  fi
+
+  local stake_address
+  stake_address=$(cat "${NODE_HOME}/${STAKE_ADDR_FILENAME}")
+  local payload="{\"_stake_addresses\":[\"${stake_address}\"]}"
+
+  local status_drep_delegate
+  status_drep_delegate=$(curl -s --max-time 10 -X POST "${KOIOS_API}/account_info" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d "$payload" | jq -r '.[0].delegated_drep // "null"')
+
+  echo -e "${YELLOW}DRep委任状況:${NC}"
+  case "${status_drep_delegate}" in
+    "null" | "" )
+      echo -e "  ${RED}未委任${NC}"
+      ;;
+    "drep_always_abstain" )
+      echo -e "  ${YELLOW}自動棄権 (always-abstain)${NC}"
+      ;;
+    "drep_always_no_confidence" )
+      echo -e "  ${YELLOW}自動不信任 (always-no-confidence)${NC}"
+      ;;
+    drep1* )
+      local drep_ids="{\"_drep_ids\":[\"${status_drep_delegate}\"]}"
+      local drep_data drep_name
+      drep_data=$(curl -s --max-time 10 -X POST "${KOIOS_API}/drep_metadata" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -d "$drep_ids")
+      drep_name=$(echo "$drep_data" | jq -r '.[0].meta_json.body.givenName // empty' 2>/dev/null)
+      echo -e "  ${GREEN}${status_drep_delegate}${NC}"
+      [[ -n "$drep_name" ]] && echo -e "  DRep名: ${GREEN}${drep_name}${NC}"
+      ;;
+    * )
+      echo -e "  ${status_drep_delegate}"
+      ;;
+  esac
+  echo
+}
+
+# DRep IDからhexとDRep名を取得 (結果は drep_hex / drep_name にセット)
+_gov_check_drep_info(){
+  local drep_id=$1
+  local drep_ids="{\"_drep_ids\":[\"${drep_id}\"]}"
+  local drep_data
+  drep_data=$(curl -s --max-time 10 -X POST "${KOIOS_API}/drep_metadata" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d "$drep_ids")
+  drep_hex=$(echo "$drep_data" | jq -r '.[0].hex // empty' 2>/dev/null)
+  drep_name=$(echo "$drep_data" | jq -r '.[0].meta_json.body.givenName // empty' 2>/dev/null)
+}
+
+# payment.addr の UTXO を取得 (結果は tx_in / total_balance にセット)
+_gov_payment_utxo(){
+  cd "${NODE_HOME}" || return 1
+  if ! cardano-cli conway query utxo \
+    --address "$(cat "${NODE_HOME}/${PAYMENT_ADDR_FILENAME}")" \
+    ${NODE_NETWORK} \
+    --output-text \
+    --out-file "${NODE_HOME}/fullUtxo.out" 2>/dev/null; then
+    return 1
+  fi
+
+  tail -n +3 "${NODE_HOME}/fullUtxo.out" | sort -k3 -nr | sed -e '/lovelace + [0-9]/d' > "${NODE_HOME}/balance.out"
+
+  tx_in=""
+  total_balance=0
+  while read -r utxo; do
+    local in_addr idx utxo_balance
+    in_addr=$(awk '{ print $1 }' <<< "${utxo}")
+    idx=$(awk '{ print $2 }' <<< "${utxo}")
+    utxo_balance=$(awk '{ print $3 }' <<< "${utxo}")
+    total_balance=$(( total_balance + utxo_balance ))
+    tx_in="${tx_in} --tx-in ${in_addr}#${idx}"
+  done < "${NODE_HOME}/balance.out"
+}
+
+# ガバナンス用Tx送信フロー (signed_file を引数に取る)
+_gov_tx_submit(){
+  local signed_file=$1
+  local raw_file=${2:-""}
+
+  while :
+  do
+    Gum_OneSelect "コピーしたらEnterを押してください"
+    if [ -f "$signed_file" ]; then
+      echo
+      echo -e "ハッシュ値: ${YELLOW}$(sha256sum "${signed_file}" | awk '{ print $1 }')${NC}"
+      echo "上記のハッシュ値とエアギャップに表示されているハッシュ値を照合してください"
+      if Gum_Confirm "ハッシュ値は一致していますか？"; then
+        break
+      fi
+    else
+      echo -e "${RED}署名ファイルが見つかりません: ${signed_file}${NC}"
+      echo "正しいディレクトリにコピーしてください"
+    fi
+  done
+
+  echo
+  if Gum_Confirm "トランザクションを送信しますか？"; then
+    local tx_result
+    tx_result=$(cardano-cli conway transaction submit --tx-file "${signed_file}" ${NODE_NETWORK} 2>&1)
+    echo
+    echo -e "${WHITE}--------------------------------------------${NC}"
+    local tx_id=""
+    if [[ -z "$tx_result" ]] || echo "$tx_result" | grep -q '"txhash"'; then
+      [[ "$tx_result" == *"txhash"* ]] && tx_id=$(echo "$tx_result" | jq -r '.txhash // empty' 2>/dev/null)
+      if [[ -z "$tx_id" && -n "$raw_file" && -f "$raw_file" ]]; then
+        tx_id=$(cardano-cli conway transaction txid --tx-body-file "${raw_file}" 2>/dev/null || echo "")
+      fi
+      echo -e "${GREEN}Tx送信に成功しました${NC}"
+      [[ -n "$tx_id" ]] && echo "TxID: ${tx_id}"
+      echo
+      case "${NODE_CONFIG}" in
+        mainnet  ) echo "https://cardanoscan.io/transaction/${tx_id}" ;;
+        preprod  ) echo "https://preprod.cardanoscan.io/transaction/${tx_id}" ;;
+        preview  ) echo "https://preview.cardanoscan.io/transaction/${tx_id}" ;;
+      esac
+    else
+      echo -e "${RED}Tx送信に失敗しました${NC}"
+      echo "$tx_result"
+    fi
+    echo -e "${WHITE}--------------------------------------------${NC}"
+  else
+    echo "送信をキャンセルしました"
+  fi
+}
+
+# エアギャップ操作手順を表示してスクリプト転送を案内
+_gov_airgap_guide(){
+  local script_file=$1
+  local script_name
+  script_name=$(basename "$script_file")
+  local script_hash
+  script_hash=$(sha256sum "$script_file" | awk '{print $1}')
+
+  echo
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo -e "${YELLOW}【エアギャップ操作手順】${NC}"
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo
+  echo -e "${YELLOW}1. 以下のファイルをエアギャップにコピーしてください${NC}"
+  echo -e "   ${GREEN}${script_file}${NC}"
+  echo -e "   ${GREEN}${NODE_HOME}/params.json${NC}"
+  echo "   >> [BP] ⇒ ${script_name} / params.json ⇒ [エアギャップ]"
+  echo
+  Gum_OneSelect "コピーしたらEnterを押してください"
+  echo
+  echo -e "${YELLOW}2. エアギャップでスクリプトのハッシュ値を確認してください${NC}"
+  echo "   sha256sum \${NODE_HOME}/${script_name} | awk '{ print \$1 }'"
+  echo -e "   期待値: ${GREEN}${script_hash}${NC}"
+  echo
+  Gum_OneSelect "確認したらEnterを押してください"
+  echo
+  echo -e "${YELLOW}3. エアギャップで以下のコマンドを実行してください${NC}"
+  echo "   source \${NODE_HOME}/${script_name}"
+  echo
+}
+
+
+#==============================================================================
+# SPO投票
+#==============================================================================
+
+GovernanceSpoVote(){
+  clear
+  Header "ガバナンス - SPO投票"
+
+  # ノード疎通確認
+  if ! cardano-cli conway query tip ${NODE_NETWORK} >/dev/null 2>&1; then
+    echo -e "${RED}ノードに接続できません。cardano-nodeが起動しているか確認してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  local governance_dir="${NODE_HOME}/governance"
+  mkdir -p "$governance_dir"
+
+  echo -e "${YELLOW}SPOが投票可能なガバナンスアクション種別:${NC}"
+  echo "  1. No-confidence       (不信任案)"
+  echo "  2. New Committee       (委員会更新)"
+  echo "  3. Hard-fork           (ハードフォーク)"
+  echo "  4. Parameter Changes   (セキュリティパラメータを含む提案のみ)"
+  echo "  5. Info Action         (情報)"
+  echo
+  echo -e "${YELLOW}参考リンク:${NC}"
+  echo "  https://cardanoscan.io/govActions"
+  echo "  https://gov.tools/governance_actions"
+  echo
+  echo -e "${YELLOW}※ 投票にはTx手数料がかかります (payment.addrから引き落とされます)${NC}"
+  echo
+
+  # params.json 更新
+  LglayStyle "プロトコルパラメータを取得中..."
+  cardano-cli conway query protocol-parameters ${NODE_NETWORK} --out-file "${NODE_HOME}/params.json" 2>/dev/null
+
+  # 現在エポックをKoios APIで取得
+  local current_epoch
+  current_epoch=$(curl -s --max-time 10 "${KOIOS_API}/tip" -H "Accept: application/json" \
+    | jq -r '.[0].epoch_no // empty' 2>/dev/null)
+  if [[ -z "$current_epoch" ]]; then
+    current_epoch=$(cardano-cli conway query tip ${NODE_NETWORK} 2>/dev/null | jq -r '.epoch // 0')
+  fi
+
+  # ガバナンスアクション一覧を取得
+  LglayStyle "ガバナンスアクション一覧を取得中..."
+  local gov_state_json
+  gov_state_json=$(cardano-cli conway query gov-state ${NODE_NETWORK} 2>/dev/null)
+  if [[ -z "$gov_state_json" ]]; then
+    echo -e "${RED}ガバナンス状態の取得に失敗しました。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  # SPO投票可能な提案を抽出
+  local -a proposal_list=()
+  mapfile -t proposal_list < <(echo "$gov_state_json" | jq -r \
+    --argjson now "$current_epoch" \
+    --argjson types '["NoConfidence","NewCommittee","HardForkInitiation","UpdateCommittee","ParameterChange","InfoAction"]' '
+    def security_keys: ["maxBlockBodySize","maxTxSize","maxBlockHeaderSize","maxValueSize","maxBlockExecutionUnits","txFeePerByte","txFeeFixed"];
+    def has_security_params:
+      [.proposalProcedure.govAction.contents[]? | objects | keys[]] as $keys
+      | any($keys[]; (security_keys | index(.)));
+    .proposals | to_entries[]
+    | .value as $v
+    | select($v.expiresAfter >= $now)
+    | select($v.proposalProcedure.govAction.tag as $tag | $types | index($tag) != null)
+    | select($v.proposalProcedure.govAction.tag != "ParameterChange" or ($v | has_security_params))
+    | "\($v.actionId.txId)|\($v.actionId.govActionIx)|\($v.proposalProcedure.govAction.tag)|\($v.expiresAfter)|\($v.proposedIn)|\($v.proposalProcedure.anchor.url)"
+  ' 2>/dev/null)
+
+  if [[ ${#proposal_list[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}現在SPOが投票可能なガバナンスアクションはありません${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  # 提案一覧のタイトルをアンカーURLから取得してgum choose用リスト作成
+  local -a display_list=()
+  local i=0
+  for entry in "${proposal_list[@]}"; do
+    IFS='|' read -r tx_id action_ix proposal_tag expires_after proposed_in anchor_url <<< "$entry"
+    local anchor_title="(タイトル取得失敗)"
+    local tmp_anchor="${governance_dir}/anchor_tmp_${tx_id}_${action_ix}.json"
+    if _gov_download_anchor "$anchor_url" "$tmp_anchor" 2>/dev/null; then
+      anchor_title=$(jq -r '.body.title // "(タイトルなし)"' "$tmp_anchor" 2>/dev/null || echo "(タイトルなし)")
+      rm -f "$tmp_anchor"
+    fi
+    display_list+=("[$(( i+1 ))] ${proposal_tag}: ${anchor_title} (終了:Ep${expires_after})")
+    (( i++ ))
+  done
+  display_list+=("キャンセル")
+
+  echo
+  local selected
+  selected=$(gum choose --height=12 --no-show-help \
+    --header="投票するガバナンスアクションを選択してください" \
+    --header.foreground="244" \
+    "${display_list[@]}") || return
+  [[ "$selected" == "キャンセル" ]] && return
+
+  # 選択番号を取り出す
+  local sel_idx
+  sel_idx=$(echo "$selected" | sed 's/^\[//' | sed 's/\].*//')
+  (( sel_idx-- ))
+
+  local governance_id_tx governance_action_index proposal_type expires_after proposed_in anchor_url
+  IFS='|' read -r governance_id_tx governance_action_index proposal_type expires_after proposed_in anchor_url <<< "${proposal_list[$sel_idx]}"
+  governance_action_index=${governance_action_index:-0}
+
+  # 提案詳細表示
+  clear
+  Header "ガバナンス - SPO投票"
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo -e "${YELLOW}選択したガバナンスアクション${NC}"
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  printf "%-18s %s\n" "TxID:"         "$governance_id_tx"
+  printf "%-18s %s\n" "Index:"        "$governance_action_index"
+  printf "%-18s %s\n" "タイプ:"       "$proposal_type"
+  printf "%-18s Ep%s → Ep%s\n" "期間:" "$proposed_in" "$expires_after"
+
+  local anchor_file="${governance_dir}/anchor_${governance_id_tx}.json"
+  if _gov_download_anchor "$anchor_url" "$anchor_file" 2>/dev/null; then
+    local anchor_title anchor_abstract onchain_hash dl_hash
+    anchor_title=$(jq -r '.body.title // ""'    "$anchor_file" 2>/dev/null)
+    anchor_abstract=$(jq -r '.body.abstract // ""' "$anchor_file" 2>/dev/null)
+    onchain_hash=$(echo "$gov_state_json" | jq -r \
+      --arg txid "$governance_id_tx" --argjson ix "$governance_action_index" \
+      '.proposals | to_entries[]
+       | select(.value.actionId.txId==$txid and .value.actionId.govActionIx==$ix)
+       | .value.proposalProcedure.anchor.dataHash' 2>/dev/null)
+    dl_hash=$(b2sum -l 256 "$anchor_file" 2>/dev/null | awk '{print $1}')
+    [[ -n "$anchor_title"    ]] && printf "%-18s %s\n" "タイトル:"  "$anchor_title"
+    [[ -n "$anchor_abstract" ]] && printf "%-18s %.100s...\n" "概要:" "$anchor_abstract"
+    if [[ -n "$dl_hash" && -n "$onchain_hash" && "$dl_hash" != "$onchain_hash" ]]; then
+      echo -e "${RED}⚠ 警告: データハッシュが不一致です。内容を十分確認してから投票してください。${NC}"
+    fi
+    rm -f "$anchor_file"
+  else
+    echo -e "${YELLOW}アンカーURLの取得に失敗しました: ${anchor_url}${NC}"
+  fi
+  echo -e "${WHITE}--------------------------------------------${NC}"
+  echo
+
+  # 投票内容を選択
+  local vote_choice
+  vote_choice=$(gum choose --height=6 --no-show-help \
+    --header="投票を選択してください" \
+    --header.foreground="244" \
+    "賛成 (Yes)" "反対 (No)" "棄権 (Abstain)" "キャンセル") || return
+  [[ "$vote_choice" == "キャンセル" ]] && return
+
+  local vote_value_flag
+  case "$vote_choice" in
+    "賛成 (Yes)")     vote_value_flag="yes"     ;;
+    "反対 (No)")      vote_value_flag="no"      ;;
+    "棄権 (Abstain)") vote_value_flag="abstain" ;;
+  esac
+
+  echo
+  echo -e "${YELLOW}投票内容確認:${NC}"
+  printf "%-10s %s\n" "ガバナンスID:" "$governance_id_tx"
+  printf "%-10s %s\n" "投票:"         "$vote_choice"
+  echo
+
+  if ! Gum_Confirm "この内容でエアギャップ用スクリプトを生成しますか？"; then
+    return
+  fi
+
+  # payment.addr UTXO取得
+  LglayStyle "UTXOを取得中..."
+  if ! _gov_payment_utxo; then
+    echo -e "${RED}UTXOの取得に失敗しました。ノードが起動しているか確認してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+  if [[ $total_balance -eq 0 ]]; then
+    echo -e "${RED}payment.addrの残高が0です。手数料分のADAを入金してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  # 現在スロット取得
+  local currentSlot
+  currentSlot=$(cardano-cli conway query tip ${NODE_NETWORK} | jq -r '.slot')
+
+  # エアギャップ用スクリプト生成
+  local script_file="${NODE_HOME}/create_votetx_script"
+  local vote_file_name="spo_vote_${governance_id_tx}.json"
+  local invalid_hereafter=$(( currentSlot + 10000 ))
+
+  cat > "$script_file" << AIRGAP_EOF
+#!/bin/bash
+# SPO投票用エアギャップスクリプト (SPOKIT生成)
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\e[33m'
+NC='\033[0m'
+
+mkdir -p "\${NODE_HOME}/governance"
+chmod u+rwx "${COLDKEYS_DIR}" 2>/dev/null
+
+echo
+echo -e "\${YELLOW}=== SPO投票ファイル作成 ===${NC}"
+printf "%-20s %s\n" "ガバナンスアクションID:" "${governance_id_tx}"
+printf "%-20s %s\n" "Index:"                   "${governance_action_index}"
+printf "%-20s %s\n" "投票:"                     "${vote_value_flag}"
+echo
+
+# 投票ファイル作成
+cardano-cli conway governance vote create \\
+  --${vote_value_flag} \\
+  --governance-action-tx-id "${governance_id_tx}" \\
+  --governance-action-index "${governance_action_index}" \\
+  --cold-verification-key-file "${COLDKEYS_DIR}/${COLD_VKEY_FILENAME}" \\
+  --out-file "\${NODE_HOME}/governance/${vote_file_name}"
+if [ \$? -ne 0 ]; then
+  echo -e "\${RED}投票ファイルの作成に失敗しました\${NC}"; exit 1
+fi
+echo "投票ファイルを作成しました"
+sleep 1
+
+# Tx仮作成 (手数料計算用)
+cardano-cli conway transaction build-raw \\
+${tx_in} \\
+--tx-out \$(cat "\${NODE_HOME}/${PAYMENT_ADDR_FILENAME}")+${total_balance} \\
+--vote-file "\${NODE_HOME}/governance/${vote_file_name}" \\
+--invalid-hereafter ${invalid_hereafter} \\
+--fee 200000 \\
+--out-file "\${NODE_HOME}/governance/vote-tx.tmp"
+
+fee=\$(cardano-cli conway transaction calculate-min-fee \\
+  --tx-body-file "\${NODE_HOME}/governance/vote-tx.tmp" \\
+  --witness-count 2 \\
+  --output-text \\
+  --protocol-params-file "\${NODE_HOME}/params.json" | awk '{ print \$1 }')
+echo "Tx手数料: \${fee} Lovelace"
+txOut=\$(( ${total_balance} - \${fee} ))
+if [[ \$txOut -lt 1000000 ]]; then
+  echo -e "\${RED}残高不足です (残高: ${total_balance} Lovelace, 手数料: \${fee} Lovelace)\${NC}"; exit 1
+fi
+
+# 最終Tx作成
+cardano-cli conway transaction build-raw \\
+${tx_in} \\
+--tx-out \$(cat "\${NODE_HOME}/${PAYMENT_ADDR_FILENAME}")+\${txOut} \\
+--vote-file "\${NODE_HOME}/governance/${vote_file_name}" \\
+--invalid-hereafter ${invalid_hereafter} \\
+--fee \${fee} \\
+--out-file "\${NODE_HOME}/governance/vote-tx.raw"
+if [ \$? -ne 0 ]; then
+  echo -e "\${RED}Txファイルの作成に失敗しました\${NC}"; exit 1
+fi
+echo "Txファイルを作成しました"
+sleep 1
+
+# 署名
+cardano-cli conway transaction sign \\
+  --tx-body-file "\${NODE_HOME}/governance/vote-tx.raw" \\
+  --signing-key-file "${COLDKEYS_DIR}/${COLD_SKEY_FILENAME}" \\
+  --signing-key-file "\${NODE_HOME}/${PAYMENT_SKEY_FILENAME}" \\
+  ${NODE_NETWORK} \\
+  --out-file "\${NODE_HOME}/governance/vote-tx.signed"
+if [ \$? -ne 0 ]; then
+  echo -e "\${RED}署名に失敗しました\${NC}"; exit 1
+fi
+
+chmod a-rwx "${COLDKEYS_DIR}" 2>/dev/null
+
+echo
+echo -e "\${GREEN}投票Tx署名ファイルを作成しました\${NC}"
+echo "  \${NODE_HOME}/governance/vote-tx.signed"
+hash_value=\$(sha256sum "\${NODE_HOME}/governance/vote-tx.signed" | awk '{print \$1}')
+echo -e "ハッシュ値: \${YELLOW}\${hash_value}\${NC}"
+echo
+echo "次の手順: BPの \${NODE_HOME}/governance/ にコピーしてください"
+echo "  >> [エアギャップ] ⇒ vote-tx.signed ⇒ [BP]"
+AIRGAP_EOF
+  chmod 755 "$script_file"
+
+  # エアギャップ操作ガイド表示 (手順1〜3)
+  _gov_airgap_guide "$script_file"
+
+  # 手順4: 署名ファイル返却
+  echo -e "${YELLOW}4. エアギャップの vote-tx.signed を以下にコピーしてください${NC}"
+  echo "   ${NODE_HOME}/governance/vote-tx.signed"
+  echo "   >> [エアギャップ] ⇒ vote-tx.signed ⇒ [BP]"
+  echo
+
+  # Tx送信
+  _gov_tx_submit \
+    "${NODE_HOME}/governance/vote-tx.signed" \
+    "${NODE_HOME}/governance/vote-tx.raw"
+
+  rm -f "$script_file"
+  echo
+  Gum_OneSelect "戻る"
+}
+
+
+#==============================================================================
+# DRep委任
+#==============================================================================
+
+GovernanceDrepDelegate(){
+  clear
+  Header "ガバナンス - DRep委任"
+
+  _gov_check_drep_delegate
+
+  local delegate_value="" delegate_label="" drep_id="" drep_hex="" drep_name=""
+
+  local drep_choice
+  drep_choice=$(gum choose --height=6 --no-show-help \
+    --header="委任タイプを選択してください" \
+    --header.foreground="244" \
+    "DRep指定" "自動棄権 (always-abstain)" "自動不信任 (always-no-confidence)" "キャンセル") || return
+  [[ "$drep_choice" == "キャンセル" ]] && return
+
+  case "$drep_choice" in
+    "DRep指定" )
+      while :
+      do
+        drep_id=$(gum input --width=0 --no-show-help \
+          --header="委任先のDRepIDを入力してください" \
+          --header.foreground="99" \
+          --placeholder="drep1...")
+        [[ -z "$drep_id" ]] && { echo "入力がキャンセルされました"; return; }
+
+        echo
+        LglayStyle "DRep情報を確認中..."
+        _gov_check_drep_info "$drep_id"
+
+        if [[ -n "$drep_hex" ]]; then
+          echo -e "${YELLOW}DRepID:${NC} ${drep_id}"
+          [[ -n "$drep_name" ]] && echo -e "${YELLOW}DRep名:${NC} ${drep_name}"
+          echo
+          if Gum_Confirm "このDRepに委任しますか？"; then
+            delegate_value="--drep-key-hash ${drep_hex}"
+            delegate_label="DRep: ${drep_id}"
+            [[ -n "$drep_name" ]] && delegate_label="DRep: ${drep_name} (${drep_id})"
+            break
+          else
+            continue
+          fi
+        else
+          echo -e "${RED}DRepが見つかりませんでした。正しいDRepIDを入力してください。${NC}"
+        fi
+      done
+      ;;
+    "自動棄権 (always-abstain)" )
+      delegate_value="--always-abstain"
+      delegate_label="自動棄権 (always-abstain)"
+      ;;
+    "自動不信任 (always-no-confidence)" )
+      delegate_value="--always-no-confidence"
+      delegate_label="自動不信任 (always-no-confidence)"
+      ;;
+  esac
+
+  echo
+  echo -e "${YELLOW}委任内容:${NC} ${delegate_label}"
+  echo
+
+  if ! Gum_Confirm "この内容でエアギャップ用スクリプトを生成しますか？"; then
+    return
+  fi
+
+  # UTXO取得
+  LglayStyle "UTXOを取得中..."
+  if ! _gov_payment_utxo; then
+    echo -e "${RED}UTXOの取得に失敗しました。ノードが起動しているか確認してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+  if [[ $total_balance -eq 0 ]]; then
+    echo -e "${RED}payment.addrの残高が0です。手数料分のADAを入金してください。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  local governance_dir="${NODE_HOME}/governance"
+  mkdir -p "$governance_dir"
+
+  # params.json 更新
+  LglayStyle "プロトコルパラメータを取得中..."
+  cardano-cli conway query protocol-parameters ${NODE_NETWORK} --out-file "${NODE_HOME}/params.json" 2>/dev/null
+
+  # 現在スロット取得
+  local currentSlot
+  currentSlot=$(cardano-cli conway query tip ${NODE_NETWORK} | jq -r '.slot')
+  local invalid_hereafter=$(( currentSlot + 10000 ))
+
+  # エアギャップ用スクリプト生成
+  local script_file="${NODE_HOME}/create_drep_delegate_script"
+
+  cat > "$script_file" << AIRGAP_EOF
+#!/bin/bash
+# DRep委任用エアギャップスクリプト (SPOKIT生成)
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\e[33m'
+NC='\033[0m'
+
+mkdir -p "\${NODE_HOME}/governance"
+
+echo
+echo -e "\${YELLOW}=== DRep委任証明書作成 ===${NC}"
+printf "%-12s %s\n" "委任タイプ:" "${delegate_label}"
+echo
+
+# 委任証明書作成 (stake.vkey はエアギャップ上のファイルを使用)
+cardano-cli conway stake-address vote-delegation-certificate \\
+  --stake-verification-key-file "\${NODE_HOME}/${STAKE_VKEY_FILENAME}" \\
+  ${delegate_value} \\
+  --out-file "\${NODE_HOME}/governance/drep-deleg.cert"
+if [ \$? -ne 0 ]; then
+  echo -e "\${RED}委任証明書の作成に失敗しました\${NC}"; exit 1
+fi
+echo "委任証明書を作成しました"
+sleep 1
+
+# Tx仮作成 (手数料計算用)
+cardano-cli conway transaction build-raw \\
+${tx_in} \\
+--tx-out \$(cat "\${NODE_HOME}/${PAYMENT_ADDR_FILENAME}")+${total_balance} \\
+--certificate-file "\${NODE_HOME}/governance/drep-deleg.cert" \\
+--invalid-hereafter ${invalid_hereafter} \\
+--fee 200000 \\
+--out-file "\${NODE_HOME}/governance/drep-tx.tmp"
+
+fee=\$(cardano-cli conway transaction calculate-min-fee \\
+  --tx-body-file "\${NODE_HOME}/governance/drep-tx.tmp" \\
+  --witness-count 2 \\
+  --output-text \\
+  --protocol-params-file "\${NODE_HOME}/params.json" | awk '{ print \$1 }')
+echo "Tx手数料: \${fee} Lovelace"
+txOut=\$(( ${total_balance} - \${fee} ))
+if [[ \$txOut -lt 1000000 ]]; then
+  echo -e "\${RED}残高不足です (残高: ${total_balance} Lovelace, 手数料: \${fee} Lovelace)\${NC}"; exit 1
+fi
+
+# 最終Tx作成
+cardano-cli conway transaction build-raw \\
+${tx_in} \\
+--tx-out \$(cat "\${NODE_HOME}/${PAYMENT_ADDR_FILENAME}")+\${txOut} \\
+--certificate-file "\${NODE_HOME}/governance/drep-deleg.cert" \\
+--invalid-hereafter ${invalid_hereafter} \\
+--fee \${fee} \\
+--out-file "\${NODE_HOME}/governance/drep-tx.raw"
+if [ \$? -ne 0 ]; then
+  echo -e "\${RED}Txファイルの作成に失敗しました\${NC}"; exit 1
+fi
+echo "Txファイルを作成しました"
+sleep 1
+
+# 署名 (stake.skey + payment.skey はエアギャップ上のファイルを使用)
+cardano-cli conway transaction sign \\
+  --tx-body-file "\${NODE_HOME}/governance/drep-tx.raw" \\
+  --signing-key-file "\${NODE_HOME}/${STAKE_SKEY_FILENAME}" \\
+  --signing-key-file "\${NODE_HOME}/${PAYMENT_SKEY_FILENAME}" \\
+  ${NODE_NETWORK} \\
+  --out-file "\${NODE_HOME}/governance/drep-tx.signed"
+if [ \$? -ne 0 ]; then
+  echo -e "\${RED}署名に失敗しました\${NC}"; exit 1
+fi
+
+echo
+echo -e "\${GREEN}DRep委任Tx署名ファイルを作成しました\${NC}"
+echo "  \${NODE_HOME}/governance/drep-tx.signed"
+hash_value=\$(sha256sum "\${NODE_HOME}/governance/drep-tx.signed" | awk '{print \$1}')
+echo -e "ハッシュ値: \${YELLOW}\${hash_value}\${NC}"
+echo
+echo "次の手順: BPの \${NODE_HOME}/governance/ にコピーしてください"
+echo "  >> [エアギャップ] ⇒ drep-tx.signed ⇒ [BP]"
+AIRGAP_EOF
+  chmod 755 "$script_file"
+
+  # エアギャップ操作ガイド (手順1〜3)
+  _gov_airgap_guide "$script_file"
+
+  # 手順4: 署名ファイル返却
+  echo -e "${YELLOW}4. エアギャップの drep-tx.signed を以下にコピーしてください${NC}"
+  echo "   ${NODE_HOME}/governance/drep-tx.signed"
+  echo "   >> [エアギャップ] ⇒ drep-tx.signed ⇒ [BP]"
+  echo
+
+  # Tx送信
+  _gov_tx_submit \
+    "${NODE_HOME}/governance/drep-tx.signed" \
+    "${NODE_HOME}/governance/drep-tx.raw"
+
+  rm -f "$script_file"
+  echo
+  Gum_OneSelect "戻る"
+}
+
+
+#==============================================================================
+# ガバナンスメインメニュー
+#==============================================================================
+
+GovernanceMenu(){
+  # ブロックプロデューサーのみ使用可能
+  if [[ "$NODE_TYPE" != "ブロックプロデューサー" ]]; then
+    clear
+    Header "ガバナンス管理"
+    echo -e "${RED}ガバナンス機能はブロックプロデューサーでのみ使用可能です。${NC}"
+    Gum_OneSelect "戻る"
+    return
+  fi
+
+  while :
+  do
+    clear
+    Header "ガバナンス管理"
+
+    _gov_check_drep_delegate
+
+    local selection
+    selection=$(gum filter --height=6 --no-show-help \
+      --header.foreground="075" \
+      --indicator=">" \
+      --placeholder="番号選択も可..." \
+      --prompt="◉ " \
+      "[1] SPO投票" \
+      "[2] DRep委任" \
+      "[q] 戻る") || break
+
+    case "$selection" in
+      "[1] SPO投票" )
+        GovernanceSpoVote
+        ;;
+      "[2] DRep委任" )
+        GovernanceDrepDelegate
+        ;;
+      "[q] 戻る" )
+        break
+        ;;
+    esac
+  done
+}

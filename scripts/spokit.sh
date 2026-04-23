@@ -16,6 +16,7 @@ source ${SPOKIT_INST_DIR}/components/manage_wallet
 source ${SPOKIT_INST_DIR}/components/manage_pool
 source ${SPOKIT_INST_DIR}/components/node_sync_check
 source ${SPOKIT_INST_DIR}/components/mithril_bootstrap
+source ${SPOKIT_INST_DIR}/components/governance
 source ${env_path}
 
 clear
@@ -115,7 +116,7 @@ CnmMain(){
       do
       clear
       Header $headerTitle
-      selection=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ウォレット管理" "[2] プール情報管理" "[q] 終了")
+      selection=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ウォレット管理" "[2] プール情報管理" "[3] ガバナンス管理" "[q] 終了")
       case $selection in
         "[1] ウォレット管理" )
         manageWallet
@@ -124,7 +125,11 @@ CnmMain(){
         "[2] プール情報管理" )
         managePool
         ;;
-        
+
+        "[3] ガバナンス管理" )
+        GovernanceMenu
+        ;;
+
         "[q] 終了" )
           tmux kill-session -t spokit
         ;;
