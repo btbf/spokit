@@ -63,7 +63,7 @@ PoolSetupMenu(){
         ;;
 
         "[7] プール登録" )
-            registarPool "new"
+            registerPool "new"
         ;;
 
         "[8] 監視ツールセットアップ" )

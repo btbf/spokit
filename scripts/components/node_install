@@ -9,9 +9,9 @@ recommend_ghc_version="9.6.5"
 LibsodiumInstall(){
 #Libsodium Install
   sleep 3
-  cd ${HOME}/git || exit
+  cd ${HOME}/git || return 1
   git clone https://github.com/IntersectMBO/libsodium
-  cd libsodium || exit
+  cd libsodium || return 1
   git checkout $SODIUM_VERSION
   ./autogen.sh
   ./configure
@@ -22,9 +22,9 @@ LibsodiumInstall(){
 
 Secp256k1Install(){
   sleep 3
-  cd ${HOME}/git || exit
+  cd ${HOME}/git || return 1
   git clone https://github.com/bitcoin-core/secp256k1.git
-  cd secp256k1/ || exit
+  cd secp256k1/ || return 1
   git checkout $SECP256K1_VERSION
   ./autogen.sh
   ./configure --prefix=/usr --enable-module-schnorrsig --enable-experimental
@@ -35,9 +35,9 @@ Secp256k1Install(){
 
 BlstInstall(){
   sleep 3
-  cd ${HOME}/git || exit
+  cd ${HOME}/git || return 1
   git clone https://github.com/supranational/blst
-  cd blst || exit
+  cd blst || return 1
   git checkout $BLST_VERSION
   ./build.sh
 
@@ -64,7 +64,7 @@ BlstInstall(){
 
 GhcupInstall(){
   sleep 3
-  cd ${HOME} || exit
+  cd ${HOME} || return 1
   BOOTSTRAP_HASKELL_NONINTERACTIVE=1
   BOOTSTRAP_HASKELL_NO_UPGRADE=1
   BOOTSTRAP_HASKELL_ADJUST_BASHRC=1
@@ -94,24 +94,24 @@ NodeDownload(){
   if [ $status -eq 0 ]; then
     LglayStyle "ノードインストール開始"
     mkdir -p "${HOME}/git/cardano-node"
-    cd "${HOME}/git/cardano-node" || exit 1
+    cd "${HOME}/git/cardano-node" || return 1
     wget -q "$nodeBinary_URL"
     if [ $? -ne 0 ]; then
-      echo -e "${RED}ノードバイナリのダウンロードに失敗しました。${NC}"; exit 1
+      echo -e "${RED}ノードバイナリのダウンロードに失敗しました。${NC}"; return 1
     fi
     if ! gzip -t "cardano-node-${1}-linux.tar.gz" 2>/dev/null; then
       echo -e "${RED}ダウンロードファイルが破損しています。${NC}"
-      rm -f "cardano-node-${1}-linux.tar.gz"; exit 1
+      rm -f "cardano-node-${1}-linux.tar.gz"; return 1
     fi
     tar zxvf "cardano-node-${1}-linux.tar.gz" ./bin/cardano-node ./bin/cardano-cli > /dev/null 2>&1
     if [ $? -ne 0 ]; then
-      echo -e "${RED}ノードバイナリの解凍に失敗しました。${NC}"; exit 1
+      echo -e "${RED}ノードバイナリの解凍に失敗しました。${NC}"; return 1
     fi
     local cli_path node_path
     cli_path=$(find "${HOME}/git/cardano-node" -type f -name "cardano-cli")
     node_path=$(find "${HOME}/git/cardano-node" -type f -name "cardano-node")
     if [[ -z "$cli_path" || -z "$node_path" ]]; then
-      echo -e "${RED}バイナリファイルが見つかりません。${NC}"; exit 1
+      echo -e "${RED}バイナリファイルが見つかりません。${NC}"; return 1
     fi
     sudo cp "$cli_path" /usr/local/bin/cardano-cli
     sudo cp "$node_path" /usr/local/bin/cardano-node
@@ -126,11 +126,11 @@ NodeDownload(){
     #GHCUPインストール
     GhcupInstall
 
-    cd "$HOME/git" || exit 1
+    cd "$HOME/git" || return 1
     gitURL="https://github.com/IntersectMBO/cardano-node.git"
     echo "git-URL: $(DglayStyle $gitURL)"
-    git clone "$gitURL" || { echo -e "${RED}リポジトリのクローンに失敗しました。${NC}"; exit 1; }
-    cd cardano-node || exit 1
+    git clone "$gitURL" || { echo -e "${RED}リポジトリのクローンに失敗しました。${NC}"; return 1; }
+    cd cardano-node || return 1
     git fetch --quiet --all --recurse-submodules --tags
     git checkout --quiet tags/$1
     echo "git tag:$(DglayStyle $1)"
@@ -162,7 +162,7 @@ NodeConfigDownload(){
   LglayStyle "ノード設定ファイルをダウンロードします..."
   sleep 2
   mkdir -p ${NODE_HOME}
-  cd ${NODE_HOME} || exit
+  cd ${NODE_HOME} || return 1
   wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-byron-genesis.json -O ${NODE_CONFIG}-byron-genesis.json
   wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-topology.json -O ${NODE_CONFIG}-topology.json
   wget -q https://spojapanguild.net/node_config/${recommend_node_version}/${NODE_CONFIG}-shelley-genesis.json -O ${NODE_CONFIG}-shelley-genesis.json
@@ -183,7 +183,7 @@ NodeConfigDownload(){
 GliveViewDowndload(){
   sleep 2
   mkdir -p ${NODE_HOME}/scripts
-  cd ${NODE_HOME}/scripts || exit
+  cd ${NODE_HOME}/scripts || return 1
   sudo sudo apt install bc tcptraceroute -y > /dev/null 2>&1
 
   curl -s -o gLiveView.sh https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/gLiveView.sh
@@ -249,27 +249,6 @@ NodeInstall(){
       return
     fi
 
-  # else
-  #   #テストネット用
-  #   version_list=$(curl -s "https://api.github.com/repos/$repo/releases" \
-  # | jq -r '.[].tag_name' \
-  # | head -n 2 \
-  # | while read tag; do
-  #     echo -n "$tag "
-  #     count=$((count + 1))
-  #   done
-  #   echo -n "${tag}キャンセル"
-  #   )
-
-  #   printf "最新バージョン: $(YellowStyle $latest_node_version)\n"
-  #   select_node_version=$(gum choose --header.foreground="244" --header="インストールするノードバージョンを選択してください" --no-show-help $version_list)
-  #   printf "選択バージョン: $(GreenStyle $select_node_version)\n"
-  # fi
-  # echo
-  # if [[ $select_node_version != "キャンセル" ]]; then
-
-  # fi
-
   #ノード起動ポート選択
   select_port "node"
   
@@ -298,7 +277,7 @@ CONFIG=\${DIRECTORY}/${NODE_CONFIG}-config.json
 /usr/local/bin/cardano-node +RTS -N --disable-delayed-os-memory-return -I0.1 -Iw300 -A16m -F1.5 -H2500M -RTS run --topology \${TOPOLOGY} --database-path \${DB_PATH} --socket-path \${SOCKET_PATH} --host-addr \${HOSTADDR} --port \${PORT} --config \${CONFIG}
 EOF
 
-  cd ${NODE_HOME} || exit
+  cd ${NODE_HOME} || return 1
   chmod +x ${node_run_filename}
 
   YellowStyle "起動スクリプトを作成しました"

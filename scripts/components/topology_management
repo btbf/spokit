@@ -126,7 +126,7 @@ EOF
     break 1
     else
     echo "数字を入力してください"
-    exit 1
+    continue
     fi
 done
 }

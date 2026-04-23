@@ -6,7 +6,7 @@ nodeSyncCheck(){
 ##############################
 # ここでパスワード入力が求められ、認証が完了するまで先に待機します。
 sudopass=$(InputSudoPass)
-echo "$sudopass" | sudo -v || { echo "sudo 認証に失敗しました。"; exit 1; }
+echo "$sudopass" | sudo -v || { echo "sudo 認証に失敗しました。"; return 1; }
 
 
 # エラーメッセージと対応する決まった文章を連想配列で定義
@@ -74,7 +74,7 @@ while IFS= read -r line; do
         if [[ "$line" == *"$err"* ]]; then
             stop_spinner
             ErrorStyle "エラー検知: [$err] → ${error_response[$err]}"
-            exit 1
+            return 1
         fi
     done
 
@@ -112,7 +112,7 @@ while IFS= read -r line; do
                     if [[ $metrics_elapsed -ge $metrics_limit ]]; then
                         stop_spinner
                         ErrorStyle "タイムアウト: メトリクスの取得に失敗しました。ノードの状態を確認してください。"
-                        exit 1
+                        return 1
                     fi
                     sleep 1
                 done
@@ -125,7 +125,7 @@ local journal_exit=$?
 stop_spinner
 if [[ $journal_exit -eq 124 ]]; then
   ErrorStyle "タイムアウト: ノードが1時間以内に起動しませんでした。ログを確認してください。"
-  exit 1
+  return 1
 fi
 }
 

@@ -343,7 +343,6 @@ managePool(){
     do
         clear
         Header "プール情報管理メニュー"
-        # selection=$(gum choose --header.foreground="244" --header="" --height=12 --no-show-help "1.ノードインストール ${installCheck}" "2.プールメタデータ作成 ${metaDataCheck}" "3.トポロジー設定" "4.プールキー作成${bpKeyCreateCheck}" "5.運用ウォレット準備${walletCheck}" "6.ステークアドレス登録" "7.プール登録" "8.監視ツールインストール" "メインメニュー")
         manage_pool_select=$(gum filter --height=12 --no-show-help --header.foreground="075" --indicator=">" --placeholder="番号選択も可..." --prompt="◉ " "[1] ブロック生成状態チェック" "[2] KES更新" "[3] トポロジー変更" "[4] プールメタデータ変更" "[5] プール登録証明書変更" "[b] 戻る" "[q] 終了")
         case $manage_pool_select in
         
@@ -364,7 +363,7 @@ managePool(){
         ;;
 
         "[5] プール登録証明書変更" )
-        registarPool "renewal"
+        registerPool "renewal"
         ;;
 
         "[b] 戻る" )

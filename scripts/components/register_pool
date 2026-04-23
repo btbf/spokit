@@ -43,7 +43,7 @@ EOF
         create_airgap_script "ステークアドレス委任Tx署名ファイル作成" "${script_discription}"
         signing_tx_file "stake_address"
 
-        cd ${NODE_HOME} || exit
+        cd ${NODE_HOME} || return 1
         tar -czvf airgap-set.tar.gz tx.raw airgap_script
         if [ $? -eq 0 ]; then
             message_file_transfer "airgap-set.tar.gz" "airgap"
@@ -61,7 +61,7 @@ EOF
     fi
 }
 
-registarPool(){
+registerPool(){
     #プールIDオンチェーン確認
     poolIdInfo=$(cardano-cli query stake-pools $NODE_NETWORK | grep $(cat ${NODE_HOME}/${POOL_ID_BECH32_FILENAME}) 2> /dev/null)
     if [[ "$poolIdInfo" != "" ]]; then
@@ -180,7 +180,7 @@ EOF
     cardano-cli conway transaction build-raw ${tx_in} --tx-out \$(cat \${NODE_HOME}/${PAYMENT_ADDR_FILENAME})+\${txOut} --invalid-hereafter \$(( ${currentSlot} + 10000)) --fee \${fee} --certificate-file \${NODE_HOME}/${POOL_CERT_FILENAME} --certificate-file \${NODE_HOME}/deleg.cert --out-file \${NODE_HOME}/tx.raw
 EOF
     signing_tx_file "pool_register"
-    cd ${NODE_HOME} || exit
+    cd ${NODE_HOME} || return 1
     tar -czvf airgap-set.tar.gz poolMetaDataHash.txt params.json airgap_script | awk '{print $NF}' | paste -sd " / " -
     if [ $? -eq 0 ]; then
         echo

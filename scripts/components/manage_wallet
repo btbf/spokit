@@ -219,7 +219,7 @@ EOF
   create_airgap_script "paymentアドレス引き出しTx署名ファイル作成" "${script_discription}"
   signing_tx_file "payment_address"
 
-  cd "${NODE_HOME}" || exit
+  cd "${NODE_HOME}" || return 1
   tar -czf airgap-set.tar.gz tx.raw airgap_script
   message_file_transfer "airgap-set.tar.gz" "airgap"
   Cli_TxSubmit
