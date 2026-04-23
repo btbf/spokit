@@ -32,7 +32,7 @@ send_address(){
         printf "${YELLOW}出金手続きをキャンセルしました${NC}\n"
         Gum_OneSelect "戻る"
         return 1
-      elif [ -z $destinationAddress ]; then
+      elif [ -z "$destinationAddress" ]; then
         printf "\n${RED}出金先アドレスを再度入力してください${NC}\n\n"
       else
       #adahandle
@@ -136,8 +136,8 @@ manageWallet(){
               #トランザクションファイル仮作成
               cardano-cli conway transaction build-raw \
               ${tx_in} \
-              --tx-out $(cat $NODE_HOME/$PAYMENT_ADDR_FILENAME)+${total_balance} \
-              --tx-out ${destinationAddress}+${pool_reward} \
+              --tx-out "$(cat "$NODE_HOME/$PAYMENT_ADDR_FILENAME")+${total_balance}" \
+              --tx-out "${destinationAddress}+${pool_reward}" \
               --invalid-hereafter $(( ${currentSlot} + 10000)) \
               --fee 200000 \
               --withdrawal ${withdrawalString} \
@@ -155,14 +155,14 @@ manageWallet(){
               txOut=$((${total_balance}-${fee}))
               #echo Change Output: ${txOut}
 
-              tx_Check $destinationAddress ${pool_reward} $fee ${txOut}
+              tx_Check "$destinationAddress" ${pool_reward} $fee ${txOut}
 
 
               #最終トランザクションファイル作成
               cardano-cli conway transaction build-raw \
               ${tx_in} \
-              --tx-out $(cat $NODE_HOME/$PAYMENT_ADDR_FILENAME)+${txOut} \
-              --tx-out ${destinationAddress}+${pool_reward} \
+              --tx-out "$(cat "$NODE_HOME/$PAYMENT_ADDR_FILENAME")+${txOut}" \
+              --tx-out "${destinationAddress}+${pool_reward}" \
               --invalid-hereafter $(( ${currentSlot} + 10000)) \
               --fee ${fee} \
               --withdrawal ${withdrawalString} \
@@ -213,12 +213,12 @@ manageWallet(){
               while :
               do
                 read -p "出金額： > " amountToSend
-                if [[ "$amountToSend" -ge 1000000 ]]; then
+                if [[ "$amountToSend" =~ ^[0-9]+$ ]] && [[ "$amountToSend" -ge 1000000 ]]; then
                   cal_amount=$(scale1 $amountToSend)
                   break
                 else
                     echo
-                    echo "出金額は1000000 Lovelaces(1ADA)以上を指定してください"
+                    echo "出金額は1000000 Lovelaces(1ADA)以上の整数を指定してください"
                     echo
                 fi
               done
@@ -236,8 +236,8 @@ manageWallet(){
               #トランザクションファイル仮作成
               cardano-cli conway transaction build-raw \
                   ${tx_in} \
-                  --tx-out $(cat $NODE_HOME/$PAYMENT_ADDR_FILENAME)+${tempBalanceAmont} \
-                  --tx-out ${destinationAddress}+${amountToSend} \
+                  --tx-out "$(cat "$NODE_HOME/$PAYMENT_ADDR_FILENAME")+${tempBalanceAmont}" \
+                  --tx-out "${destinationAddress}+${amountToSend}" \
                   --invalid-hereafter $(( ${currentSlot} + 10000)) \
                   --fee 200000 \
                   --out-file $NODE_HOME/tx.tmp
@@ -252,12 +252,12 @@ manageWallet(){
 
               #残高-手数料-出金額
               txOut=$((${total_balance}-${fee}-${amountToSend}))
-              tx_Check $destinationAddress $amountToSend $fee ${txOut}
+              tx_Check "$destinationAddress" $amountToSend $fee ${txOut}
 
               #printf "$rows" "出金後残高:" "$(scale1 ${txOut}) ADA"
 
               #最終トランザクションファイル作成
-              cardano-cli conway transaction build-raw ${tx_in} --tx-out $(cat $NODE_HOME/$PAYMENT_ADDR_FILENAME)+${txOut} --tx-out ${destinationAddress}+${amountToSend} --invalid-hereafter $(( ${currentSlot} + 10000)) --fee ${fee} --out-file $NODE_HOME/tx.raw
+              cardano-cli conway transaction build-raw ${tx_in} --tx-out "$(cat "$NODE_HOME/$PAYMENT_ADDR_FILENAME")+${txOut}" --tx-out "${destinationAddress}+${amountToSend}" --invalid-hereafter $(( ${currentSlot} + 10000)) --fee ${fee} --out-file $NODE_HOME/tx.raw
               script_discription=$(cat <<EOF
 このスクリプトでは以下の処理が実行されます
 1.トランザクション署名ファイル \${GREEN}tx.signed\${NC} の作成

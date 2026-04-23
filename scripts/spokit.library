@@ -398,12 +398,12 @@ message_file_transfer(){
 #プールデータAPI取得
 get_pooldata(){
   #APIリクエストクエリjson生成
-  pId_json="{\""_pool_bech32_ids"\":[\""$(cat $NODE_HOME/$POOL_ID_BECH32_FILENAME)"\"]}"
+  pId_json="{\"_pool_bech32_ids\":[\"$(cat "$NODE_HOME/$POOL_ID_BECH32_FILENAME")\"]}"
   #API プールデータ取得
   curl -s -X POST "$KOIOS_API/pool_info" \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
-  -d $pId_json > $NODE_HOME/pooldata.txt
+  -d "$pId_json" > "$NODE_HOME/pooldata.txt"
   wait
 
   pooldata_chk=$(cat $NODE_HOME/pooldata.txt)
@@ -481,37 +481,18 @@ style(){
   printf '{{ Color "15" "'"$1"'" }}''{{ Color "11" " '"$2"' " }}' | gum format -t template; echo
 }
 
-YellowStyle(){
-  printf '{{ Color "11" "'"$1"'" }}' | gum format -t template; echo
+ColorStyle(){
+  printf '{{ Color "'"$1"'" "'"$2"'" }}' | gum format -t template; echo
 }
 
-MagentaStyle(){
-  printf '{{ Color "127" "'"$1"'" }}' | gum format -t template; echo
-}
-
-PinkStyle(){
-  printf '{{ Color "127" "'"$1"'" }}' | gum format -t template; echo
-}
-
-GreenStyle(){
-  printf '{{ Color "2" "'"$1"'" }}' | gum format -t template; echo
-}
-
-CyanStyle(){
-  printf '{{ Color "6" "'"$1"'" }}' | gum format -t template; echo
-}
-
-LglayStyle(){
-  printf '{{ Color "249" "'"$1"'" }}' | gum format -t template; echo
-}
-
-DglayStyle(){
-  printf '{{ Color "242" "'"$1"'" }}' | gum format -t template; echo
-}
-
-ErrorStyle(){
-  printf '{{ Color "196" "'"$1"'" }}' | gum format -t template; echo
-}
+YellowStyle()  { ColorStyle "11"  "$1"; }
+MagentaStyle() { ColorStyle "127" "$1"; }
+PinkStyle()    { ColorStyle "127" "$1"; }
+GreenStyle()   { ColorStyle "2"   "$1"; }
+CyanStyle()    { ColorStyle "6"   "$1"; }
+LglayStyle()   { ColorStyle "249" "$1"; }
+DglayStyle()   { ColorStyle "242" "$1"; }
+ErrorStyle()   { ColorStyle "196" "$1"; }
 
 #spin
 Gum_DotSpinner3(){
