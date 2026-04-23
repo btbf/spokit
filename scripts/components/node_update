@@ -3,11 +3,17 @@
 
 #==============================================================================
 # node_update - cardano-node プレビルドバイナリアップデート
+# アップデート先バージョンは SPOKIT 推奨バージョンに固定
 #==============================================================================
+
+recommend_update_node_version="10.5.3"
+recommend_update_cli_version="10.11.0.0"
 
 NodeUpdate(){
   clear
   Header "ノードアップデート"
+
+  local target_version="$recommend_update_node_version"
 
   #------------------------------------------------------------
   # 現在インストール済みのバージョン表示
@@ -16,43 +22,23 @@ NodeUpdate(){
   cur_node=$(cardano-node version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "不明")
   cur_cli=$(cardano-cli  version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "不明")
 
-  echo -e "${YELLOW}現在インストール済みのバージョン:${NC}"
-  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" "$cur_node"
-  printf "  %-16s ${GREEN}%s${NC}\n" "cardano-cli:"  "$cur_cli"
+  echo -e "${YELLOW}バージョン情報:${NC}"
+  printf "  %-22s ${GREEN}%s${NC}\n" "現在 cardano-node:" "$cur_node"
+  printf "  %-22s ${GREEN}%s${NC}\n" "現在 cardano-cli:"  "$cur_cli"
+  echo
+  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 node:"  "$recommend_update_node_version"
+  printf "  %-22s ${CYAN}%s${NC}\n" "SPOKIT推奨 cli:"   "$recommend_update_cli_version"
   echo
 
-  #------------------------------------------------------------
-  # GitHub から最新バージョンを取得
-  #------------------------------------------------------------
-  local latest_version=""
-  latest_version=$(curl -s --max-time 10 \
-    https://api.github.com/repos/IntersectMBO/cardano-node/releases/latest \
-    | jq -r '.tag_name' | sed 's/^v//' 2>/dev/null)
-  if [[ -z "$latest_version" || "$latest_version" == "null" ]]; then
-    echo -e "${YELLOW}GitHubからの最新バージョン取得に失敗しました。バージョンを手動で入力してください。${NC}"
-    latest_version=""
-  else
-    echo -e "GitHubの最新バージョン: ${GREEN}${latest_version}${NC}"
+  # すでに推奨バージョンがインストール済みの場合は警告
+  if [[ "$cur_node" == "$target_version" ]]; then
+    echo -e "${YELLOW}すでにSPOKIT推奨バージョン (${target_version}) がインストールされています${NC}"
+    echo
+    if ! Gum_Confirm "それでもアップデートを実行しますか？"; then
+      return
+    fi
+    echo
   fi
-  echo
-
-  #------------------------------------------------------------
-  # アップデート先バージョン入力
-  #------------------------------------------------------------
-  local target_version
-  target_version=$(gum input \
-    --value="${latest_version}" \
-    --width=0 \
-    --no-show-help \
-    --header="アップデート先のバージョンを入力してください" \
-    --header.foreground="99" \
-    --placeholder="例: 10.6.4")
-  if [[ -z "$target_version" ]]; then
-    echo -e "${RED}バージョンが入力されていません${NC}"
-    Gum_OneSelect "戻る"
-    return
-  fi
-  echo
 
   #------------------------------------------------------------
   # バイナリダウンロード
@@ -67,7 +53,7 @@ NodeUpdate(){
     --title "cardano-node v${target_version} をダウンロード中..." -- \
     wget -q "$tar_url" -O "$tar_file"
   if [ $? -ne 0 ] || ! gzip -t "$tar_file" 2>/dev/null; then
-    echo -e "${RED}ダウンロードに失敗しました。バージョン番号を確認してください: ${target_version}${NC}"
+    echo -e "${RED}ダウンロードに失敗しました。インターネット接続を確認してください。${NC}"
     rm -rf "$dl_dir"
     Gum_OneSelect "戻る"
     return
@@ -78,7 +64,6 @@ NodeUpdate(){
       ./bin/cardano-node \
       ./bin/cardano-cli \
       ./bin/snapshot-converter 2>/dev/null
-  # snapshot-converter が存在しないバージョンでも tar はエラーを返さない
   if [ $? -ne 0 ]; then
     # ./bin/ 形式でなければフラット展開を試みる
     tar zxf "$tar_file" -C "$dl_dir" 2>/dev/null || true
@@ -88,12 +73,13 @@ NodeUpdate(){
   #------------------------------------------------------------
   # 展開したバイナリのバージョン確認
   #------------------------------------------------------------
-  local node_bin cli_bin
-  node_bin=$(find "$dl_dir" -type f -name "cardano-node" 2>/dev/null | head -1)
-  cli_bin=$(find  "$dl_dir" -type f -name "cardano-cli"  2>/dev/null | head -1)
+  local node_bin cli_bin snap_conv_bin
+  node_bin=$(find "$dl_dir" -type f -name "cardano-node"          2>/dev/null | head -1)
+  cli_bin=$(find  "$dl_dir" -type f -name "cardano-cli"           2>/dev/null | head -1)
+  snap_conv_bin=$(find "$dl_dir" -type f -name "snapshot-converter" 2>/dev/null | head -1)
 
   if [[ -z "$node_bin" ]]; then
-    echo -e "${RED}cardano-node バイナリが見つかりません。アーカイブの内容を確認してください。${NC}"
+    echo -e "${RED}cardano-node バイナリが見つかりません。${NC}"
     rm -rf "$dl_dir"
     Gum_OneSelect "戻る"
     return
@@ -101,7 +87,7 @@ NodeUpdate(){
 
   local new_node new_cli
   new_node=$("$node_bin" version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "確認失敗")
-  new_cli=$( [[ -n "$cli_bin" ]] && "$cli_bin"  version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "なし")
+  new_cli=$([[ -n "$cli_bin" ]] && "$cli_bin" version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "なし")
 
   echo -e "${YELLOW}ダウンロードしたバイナリのバージョン:${NC}"
   printf "  %-16s ${GREEN}%s${NC}\n" "cardano-node:" "$new_node"
@@ -176,12 +162,11 @@ NodeUpdate(){
   if [[ -n "$cli_bin" ]]; then
     sudo cp "$cli_bin" /usr/local/bin/cardano-cli
   fi
-  local snap_conv
-  snap_conv=$(find "$dl_dir" -type f -name "snapshot-converter" 2>/dev/null | head -1)
-  if [[ -n "$snap_conv" ]]; then
-    sudo cp "$snap_conv" /usr/local/bin/snapshot-converter
+  if [[ -n "$snap_conv_bin" ]]; then
+    sudo cp "$snap_conv_bin" /usr/local/bin/snapshot-converter
   fi
   rm -rf "$dl_dir"
+
   DglayStyle "バイナリを配置しました"
   echo -e "  cardano-node: ${GREEN}$(cardano-node version 2>/dev/null | head -1)${NC}"
   if [[ -n "$cli_bin" ]]; then
@@ -200,11 +185,9 @@ NodeUpdate(){
     today=$(date +%Y%m%d)
 
     for fname in "${NODE_CONFIG}-config.json" "${NODE_CONFIG}-checkpoints.json"; do
-      # バックアップ
       if [ -f "$NODE_HOME/${fname}" ]; then
         cp "$NODE_HOME/${fname}" "$NODE_HOME/backup/${fname}.${today}"
       fi
-      # ダウンロード
       if wget -q "${config_base}/${fname}" -O "$NODE_HOME/${fname}" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} ${fname}"
       else
@@ -248,7 +231,7 @@ NodeUpdate(){
       fi
     fi
 
-    # ネットワーク別エンドポイント設定
+    # ネットワーク別エンドポイント・検証キー設定
     local mithril_network
     case "${NODE_CONFIG}" in
       mainnet) mithril_network="release-mainnet" ;;
