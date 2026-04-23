@@ -73,7 +73,7 @@ SpokitUpdateCheck(){
     if Gum_Confirm "spokitをアップデートしますか？"; then
       clear
       echo -e "${YELLOW}spokitをアップデートしています...${NC}"
-      base_url="https://github.com/btbf/spokit/archive/refs/tags/${spokit_version}.tar.gz"
+      base_url="https://github.com/btbf/spokit/archive/refs/tags/${latest_version}.tar.gz"
       wget -q "${base_url}" -O "$HOME/spokit.tar.gz"
       if [ $? -ne 0 ]; then
         echo -e "${RED}SPOKITのダウンロードに失敗しました。インターネット接続を確認してください。${NC}"
@@ -85,18 +85,19 @@ SpokitUpdateCheck(){
         rm -f "$HOME/spokit.tar.gz"
         exit 1
       fi
+      cd "$HOME" || exit 1
       tar -xzf "$HOME/spokit.tar.gz"
       if [ $? -ne 0 ]; then
         echo -e "${RED}SPOKITの解凍に失敗しました。${NC}"
         exit 1
       fi
-      rm spokit.tar.gz
-      cd "spokit-${spokit_version}/scripts" || exit 1
+      rm "$HOME/spokit.tar.gz"
+      cd "spokit-${latest_version}/scripts" || exit 1
       sudo cp -pR ./* "${SPOKIT_INST_DIR}"
       chmod 755 "${SPOKIT_INST_DIR}/spokit_run.sh"
       chmod 755 "${SPOKIT_INST_DIR}/spokit.sh"
       printf "${YELLOW}SPOKITをインストールしました${NC}\n"
-      rm -rf "$HOME/git/spokit-${spokit_version}"
+      rm -rf "$HOME/spokit-${latest_version}"
     fi
   fi
 }
