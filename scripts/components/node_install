@@ -147,7 +147,7 @@ GliveViewDownload(){
   mkdir -p "${NODE_HOME}/scripts"
   cd "${NODE_HOME}/scripts" || return 1
 
-  sudo apt install bc tcptraceroute -y > /dev/null 2>&1
+  sudo apt-get install bc tcptraceroute -y > /dev/null 2>&1
 
   curl -s -o gLiveView.sh \
     https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/gLiveView.sh

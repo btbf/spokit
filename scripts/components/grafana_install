@@ -21,7 +21,7 @@ grafanaInstall(){
         fi
         echo "deb [signed-by=/usr/share/keyrings/grafana.key] https://apt.grafana.com stable main" > grafana.list
         sudo mv grafana.list /etc/apt/sources.list.d/grafana.list
-        sudo apt update && sudo apt install -y grafana
+        sudo apt-get update && sudo apt-get install -y grafana
         if [ $? -ne 0 ]; then
             echo -e "${RED}Grafanaのインストールに失敗しました。${NC}"; return 1
         fi

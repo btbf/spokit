@@ -11,7 +11,7 @@ UbuntuSetup(){
     if ! command -v unattended-upgrades &> /dev/null; then
         echo
         echo -e "${YELLOW}セキュリティアップデート自動適用ツール(unattended-upgrades)をインストールします${NC}\n"
-        sudo apt install unattended-upgrades -y > /dev/null 2>&1
+        sudo apt-get install unattended-upgrades -y > /dev/null 2>&1
         sudo DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive unattended-upgrades
         echo -e "${YELLOW}unattended-upgradesをインストールしました${NC}\n"
         sleep 1
@@ -98,7 +98,7 @@ EOF
     echo
     if ! command -v chronyd &> /dev/null; then
         echo -e "${YELLOW}chronyをインストールします${NC}\n"
-        sudo apt install chrony -y > /dev/null 2>&1
+        sudo apt-get install chrony -y > /dev/null 2>&1
         echo -e "${YELLOW}chronyをインストールしました${NC}\n"
         sleep 1
     else
@@ -311,7 +311,7 @@ EOF
         echo "❌ fail2ban はインストールされていません。"
         if Gum_Confirm "fail2banをインストールしますか?"; then
             echo -e "${YELLOW}fail2banをインストールします${NC}\n"
-            sudo apt install fail2ban -y > /dev/null 2>&1
+            sudo apt-get install fail2ban -y > /dev/null 2>&1
         fi
     fi
 

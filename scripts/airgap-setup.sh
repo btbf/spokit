@@ -67,8 +67,8 @@ Main(){
 
     #依存関係インストール
     echo -e "${YELLOW}依存関係のインストールを開始します${NC}"
-    sudo apt update
-    sudo apt install -y git nano jq bc automake tmux htop curl build-essential pkg-config make g++ wget zstd -y
+    sudo apt-get update
+    sudo apt-get install -y git nano jq bc automake tmux htop curl build-essential pkg-config make g++ wget zstd -y
     echo -e "${GREEN}依存関係のインストールが完了しました${NC}"
 
     #cardano-cliインストール

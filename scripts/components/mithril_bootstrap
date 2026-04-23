@@ -4,7 +4,7 @@ MithrilBootStrap(){
   LglayStyle "Mithrilクライアントインストール開始..."
   sleep 2
   #Rustインストール
-  sudo apt install -y libssl-dev build-essential m4 jq > /dev/null 2>&1
+  sudo apt-get install -y libssl-dev build-essential m4 jq > /dev/null 2>&1
 
   cd "${HOME}/git" || { echo -e "${RED}ディレクトリへの移動に失敗しました${NC}"; return 1; }
 
