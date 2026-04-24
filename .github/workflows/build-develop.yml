@@ -20,7 +20,7 @@ jobs:
       - name: Read version
         id: version
         run: |
-          spokit_version=$(grep -E '^version=' ./scripts/spokit.library | head -1 | cut -d'=' -f2 | tr -d '"')
+          spokit_version=$(grep -E '^spokit_version=' ./scripts/spokit.library | head -1 | cut -d'=' -f2 | tr -d '"')
           echo "📦 Detected version: $spokit_version"
           {
             echo "spokit_version<<EOF"
